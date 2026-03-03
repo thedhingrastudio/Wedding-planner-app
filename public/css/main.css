@@ -2073,3 +2073,64 @@ body{
   padding: 6px 10px;
   font-size: 12px;
 }
+
+/* Members rows clickable */
+.members-row--link{
+  text-decoration: none;
+  color: inherit;
+}
+.members-row--link:hover{
+  background: rgba(0,0,0,0.02);
+}
+/* ===== Member detail page (projects/member.php) ===== */
+.member-head{ margin: 6px 0 14px; }
+.member-h1{ font-size: 22px; font-weight: 850; }
+.member-sub{ color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.member-grid{
+  display:grid;
+  grid-template-columns: 360px minmax(0,1fr);
+  gap: 14px;
+  align-items:start;
+}
+
+.member-info-row{
+  display:grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+.member-info-row:first-of-type{ border-top: none; }
+.member-info-label{ color: var(--muted); font-size: 12px; }
+.member-info-val{ font-size: 13px; font-weight: 650; }
+
+.member-roles{ margin-top: 12px; display:flex; flex-wrap:wrap; gap: 8px; }
+
+.task-list{ margin-top: 10px; display:grid; }
+.task-row{
+  display:grid;
+  grid-template-columns: 34px 1fr auto 18px;
+  gap: 12px;
+  align-items:center;
+  padding: 12px 0;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+.task-row:first-child{ border-top: none; }
+
+.task-ico{
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background:#fff;
+  display:grid;
+  place-items:center;
+}
+.task-title{ font-weight: 750; font-size: 13px; }
+.task-meta{ color: var(--muted); font-size: 12px; margin-top: 4px; display:flex; gap: 8px; flex-wrap:wrap; }
+.task-arrow{ opacity: 0.5; font-size: 18px; text-align:right; }
+
+@media (max-width: 1100px){
+  .member-grid{ grid-template-columns: 1fr; }
+}

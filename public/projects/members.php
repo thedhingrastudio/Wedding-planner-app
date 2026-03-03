@@ -244,10 +244,37 @@ $overdue = 0;
                     $hay = strtolower($name . ' ' . $email . ' ' . $rolesCsv);
                     $rolesForAttr = strtolower(implode(',', $roles));
                   ?>
-                  <div class="members-row"
-                       data-members-row
-                       data-hay="<?php echo h($hay); ?>"
-                       data-roles="<?php echo h($rolesForAttr); ?>">
+                  <?php $cmid = (int)($m['company_member_id'] ?? 0); ?>
+<a class="members-row members-row--link"
+   href="<?php echo h(base_url('projects/member.php?id=' . $projectId . '&cmid=' . $cmid)); ?>"
+   data-members-row
+   data-hay="<?php echo h($hay); ?>"
+   data-roles="<?php echo h($rolesForAttr); ?>">
+
+  <div class="members-cell members-name"><?php echo h($name); ?></div>
+
+  <div class="members-cell members-role">
+    <div class="members-role-chips">
+      <?php if (!$roles): ?>
+        <span style="color:var(--muted); font-size:12px;">—</span>
+      <?php else: ?>
+        <?php foreach ($roles as $r): ?>
+          <span class="tag tag--sm"><?php echo h(role_label($r)); ?></span>
+        <?php endforeach; ?>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <div class="members-cell members-center">
+    <span class="task-pill task-pill--open"><?php echo h((string)$open); ?> open tasks</span>
+  </div>
+
+  <div class="members-cell members-center">
+    <span class="task-pill task-pill--due"><?php echo h((string)$due); ?> due tasks</span>
+  </div>
+
+  <div class="members-cell members-arrow">›</div>
+</a>
 
                     <div class="members-cell members-name"><?php echo h($name); ?></div>
 
