@@ -10,7 +10,8 @@ require_login();
 $pdo = $pdo ?? get_pdo();
 
 $projectId = (int)($_GET['id'] ?? 0);
-$cmid = (int)($_GET['cmid'] ?? 0);
+$cmid      = (int)($_GET['cmid'] ?? 0);
+
 if ($projectId <= 0 || $cmid <= 0) redirect('projects/index.php');
 
 $companyId = current_company_id();
@@ -50,6 +51,34 @@ function role_label(string $role): string {
   return $map[$role] ?? ucfirst(str_replace('_', ' ', $role));
 }
 
+function cat_label(string $cat): string {
+  $map = [
+    'follow_ups' => 'Follow ups',
+    'rsvp' => 'Invite & RSVP',
+    'guest_list' => 'Guest list',
+    'transport' => 'Travel & transport',
+    'hospitality' => 'Hotel & hospitality',
+    'vendors' => 'Vendors',
+    'general' => 'General',
+  ];
+  $cat = trim($cat);
+  return $map[$cat] ?? ucfirst(str_replace('_', ' ', $cat));
+}
+
+function cat_icon(string $cat): string {
+  $map = [
+    'follow_ups' => '✉️',
+    'rsvp' => '📩',
+    'guest_list' => '👥',
+    'transport' => '🚗',
+    'hospitality' => '🏨',
+    'vendors' => '🧾',
+    'general' => '☑️',
+  ];
+  $cat = trim($cat);
+  return $map[$cat] ?? '☑️';
+}
+
 // Roles for this member in this project
 $roles = [];
 try {
@@ -86,29 +115,66 @@ if ($adminName === '') $adminName = 'Admin';
 $createdAt = (string)($project['created_at'] ?? '');
 $projectDateLabel = $createdAt ? date('F j, Y', strtotime($createdAt)) : 'Date TBD';
 
-$pageTitle = $project['title'] . ' — ' . $member['full_name'] . ' — Vidhaan';
-require_once $root . '/includes/header.php';
-
-// Task placeholders (until tasks module exists)
+// Project stats (optional, matches your reference top row)
 $membersCount = 0;
-try {
-  $tc = $pdo->prepare("SELECT COUNT(DISTINCT company_member_id) FROM project_members WHERE project_id = :pid AND company_member_id IS NOT NULL");
-  $tc->execute([':pid' => $projectId]);
-  $membersCount = (int)($tc->fetchColumn() ?: 0);
-} catch (Throwable $e) { $membersCount = 0; }
-
 $openTasks = 0;
 $dueSoon = 0;
 $overdue = 0;
 
-// For now: fake sample tasks in UI (remove later when tasks table exists)
-$sampleTasks = [
-  ['icon'=>'✉️','title'=>'Follow ups: 18 pending guests RSVPs','assigned'=>'01/02/2026','due'=>'01/02/2026','status'=>'Pending'],
-  ['icon'=>'✉️','title'=>'Follow ups: 30 guests dietary restrictions pending','assigned'=>'05/02/2026','due'=>'05/02/2026','status'=>'Pending'],
-  ['icon'=>'🚗','title'=>'Pick ups: Assign pick ups for March 18 arrivals','assigned'=>'27/12/2025','due'=>'27/12/2025','status'=>'Due'],
-  ['icon'=>'🏨','title'=>'Accommodation: 3 guests’ accommodation preference pending','assigned'=>'15/02/2026','due'=>'15/02/2026','status'=>'Due'],
-  ['icon'=>'✉️','title'=>'Follow ups: 12 guests’ details missing','assigned'=>'01/02/2026','due'=>'01/02/2026','status'=>'Completed'],
-];
+try {
+  $tc = $pdo->prepare("SELECT COUNT(DISTINCT company_member_id) FROM project_members WHERE project_id = :pid AND company_member_id IS NOT NULL");
+  $tc->execute([':pid' => $projectId]);
+  $membersCount = (int)($tc->fetchColumn() ?: 0);
+} catch (Throwable $e) {}
+
+try {
+  $cs = $pdo->prepare("
+    SELECT
+      SUM(CASE WHEN status <> 'completed' THEN 1 ELSE 0 END) AS open_tasks,
+      SUM(CASE WHEN status <> 'completed' AND due_on IS NOT NULL AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
+      SUM(CASE WHEN status <> 'completed' AND due_on IS NOT NULL AND due_on >= CURDATE() AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
+    FROM tasks
+    WHERE company_id = :cid AND project_id = :pid
+  ");
+  $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
+  $row = $cs->fetch() ?: [];
+  $openTasks = (int)($row['open_tasks'] ?? 0);
+  $overdue   = (int)($row['overdue_tasks'] ?? 0);
+  $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
+} catch (Throwable $e) {
+  // tasks table missing or query error — keep counts at 0
+}
+
+// ✅ REAL tasks for THIS member
+$tasks = [];
+try {
+  $ts = $pdo->prepare("
+    SELECT id, category, title, description, assigned_on, due_on, priority, status, created_at
+    FROM tasks
+    WHERE company_id = :cid
+      AND project_id = :pid
+      AND assigned_to_company_member_id = :cmid
+    ORDER BY
+      CASE
+        WHEN status <> 'completed' AND due_on IS NOT NULL AND due_on < CURDATE() THEN 0
+        WHEN status <> 'completed' AND due_on IS NOT NULL AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1
+        WHEN status <> 'completed' THEN 2
+        ELSE 3
+      END,
+      (due_on IS NULL),
+      due_on ASC,
+      created_at DESC
+  ");
+  $ts->execute([':cid' => $companyId, ':pid' => $projectId, ':cmid' => $cmid]);
+  $tasks = $ts->fetchAll() ?: [];
+} catch (Throwable $e) {
+  $tasks = [];
+}
+
+$pageTitle = $project['title'] . ' — ' . $member['full_name'] . ' — Vidhaan';
+require_once $root . '/includes/header.php';
+
+$primaryRole = $roles ? role_label($roles[0]) : 'Member';
 ?>
 
 <div class="app-shell">
@@ -128,7 +194,6 @@ $sampleTasks = [
 
     <div class="surface">
 
-      <!-- Project header bar -->
       <div class="proj-top">
         <div class="proj-top-left">
           <div class="proj-icon">💍</div>
@@ -156,7 +221,6 @@ $sampleTasks = [
 
         <div class="proj-main">
 
-          <!-- Reference-style header -->
           <div class="proj-overview-head">
             <div>
               <div class="proj-h2">Team overview</div>
@@ -169,48 +233,52 @@ $sampleTasks = [
             </div>
           </div>
 
-          <!-- Stats row -->
           <div class="team-stats">
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">👥</div>
-                <div class="team-stat-label">Members</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$membersCount); ?></div>
-            </div>
 
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">☑️</div>
-                <div class="team-stat-label">Open tasks</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$openTasks); ?></div>
-            </div>
+  <!-- ✅ Members is a link back to members list -->
+  <a class="team-stat team-stat--link"
+     href="<?php echo h(base_url('projects/members.php?id=' . $projectId)); ?>">
+    <div class="team-stat-left">
+      <div class="team-stat-ico" aria-hidden="true">👥</div>
+      <div class="team-stat-label">Members</div>
+    </div>
+    <div class="team-stat-num"><?php echo h((string)$membersCount); ?></div>
+  </a>
 
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">📅</div>
-                <div class="team-stat-label">Due soon</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$dueSoon); ?></div>
-            </div>
+  <!-- ✅ Open tasks can link to tasks filtered to this project -->
+  <a class="team-stat team-stat--link"
+     href="<?php echo h(base_url('tasks/index.php?project_id=' . $projectId)); ?>">
+    <div class="team-stat-left">
+      <div class="team-stat-ico" aria-hidden="true">☑️</div>
+      <div class="team-stat-label">Open tasks</div>
+    </div>
+    <div class="team-stat-num"><?php echo h((string)$openTasks); ?></div>
+  </a>
 
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">⚠️</div>
-                <div class="team-stat-label">Overdue tasks</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$overdue); ?></div>
-            </div>
-          </div>
+  <!-- Keep these as non-links for now (until we build a tasks list page with filters) -->
+  <div class="team-stat">
+    <div class="team-stat-left">
+      <div class="team-stat-ico" aria-hidden="true">📅</div>
+      <div class="team-stat-label">Due soon</div>
+    </div>
+    <div class="team-stat-num"><?php echo h((string)$dueSoon); ?></div>
+  </div>
 
-          <!-- Member header -->
+  <div class="team-stat">
+    <div class="team-stat-left">
+      <div class="team-stat-ico" aria-hidden="true">⚠️</div>
+      <div class="team-stat-label">Overdue tasks</div>
+    </div>
+    <div class="team-stat-num"><?php echo h((string)$overdue); ?></div>
+  </div>
+
+</div>
+
           <div class="member-head">
             <div class="member-h1"><?php echo h((string)$member['full_name']); ?></div>
-            <div class="member-sub"><?php echo h($roles ? role_label($roles[0]) : 'Member'); ?></div>
+            <div class="member-sub"><?php echo h($primaryRole); ?></div>
           </div>
 
-          <!-- Info + Tasks layout -->
           <div class="member-grid">
 
             <div class="card member-info">
@@ -245,37 +313,71 @@ $sampleTasks = [
                 <a class="btn btn-ghost" href="#" onclick="return false;">Filter</a>
               </div>
 
-              <!-- Until Tasks module exists: show sample list like reference -->
-              <div class="task-list">
-                <?php foreach ($sampleTasks as $t): ?>
-                  <?php
-                    $status = $t['status'];
-                    $pillClass = 'task-status-pill';
-                    if ($status === 'Completed') $pillClass .= ' is-complete';
-                    elseif ($status === 'Due') $pillClass .= ' is-due';
-                    else $pillClass .= ' is-pending';
-                  ?>
-                  <div class="task-row">
-                    <div class="task-ico"><?php echo h($t['icon']); ?></div>
-                    <div class="task-body">
-                      <div class="task-title"><?php echo h($t['title']); ?></div>
-                      <div class="task-meta">
-                        <span>Assigned: <?php echo h($t['assigned']); ?></span>
-                        <span class="dot">•</span>
-                        <span>Due: <?php echo h($t['due']); ?></span>
-                      </div>
-                    </div>
-                    <div class="task-status">
-                      <span class="<?php echo h($pillClass); ?>"><?php echo h($status); ?></span>
-                    </div>
-                    <div class="task-arrow">›</div>
+              <?php if (!$tasks): ?>
+                <div class="proj-empty" style="min-height:320px;">
+                  <div class="proj-empty-ico">☑️</div>
+                  <div class="proj-empty-title">No tasks assigned yet</div>
+                  <div class="proj-empty-sub">Assign a task to <?php echo h((string)$member['full_name']); ?> to see it show up here.</div>
+                  <div style="margin-top:12px;">
+                    <a class="btn btn-primary" href="<?php echo h(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
                   </div>
-                <?php endforeach; ?>
-              </div>
+                </div>
+              <?php else: ?>
+                <div class="task-list">
+                  <?php foreach ($tasks as $t): ?>
+                    <?php
+                      $cat = (string)($t['category'] ?? 'general');
+                      $icon = cat_icon($cat);
+                      $title = (string)($t['title'] ?? '');
 
-              <div class="member-note">
-                Tasks will become real once the Tasks table/module is created.
-              </div>
+                      $assigned = (string)($t['assigned_on'] ?? '');
+                      $due = (string)($t['due_on'] ?? '');
+
+                      $assignedLabel = $assigned ? date('d/m/Y', strtotime($assigned)) : '—';
+                      $dueLabel = $due ? date('d/m/Y', strtotime($due)) : '—';
+
+                      $statusRaw = (string)($t['status'] ?? 'pending');
+                      $statusLabel = 'Pending';
+                      $pillClass = 'task-status-pill is-pending';
+
+                      if ($statusRaw === 'completed') {
+                        $statusLabel = 'Completed';
+                        $pillClass = 'task-status-pill is-complete';
+                      } else {
+                        // If not completed and overdue => "Due"
+                        if ($due && strtotime($due) < strtotime(date('Y-m-d'))) {
+                          $statusLabel = 'Due';
+                          $pillClass = 'task-status-pill is-due';
+                        } else {
+                          $statusLabel = 'Pending';
+                          $pillClass = 'task-status-pill is-pending';
+                        }
+                      }
+                    ?>
+
+                    <div class="task-row">
+                      <div class="task-ico"><?php echo h($icon); ?></div>
+
+                      <div class="task-body">
+                        <div class="task-title"><?php echo h(cat_label($cat) . ': ' . $title); ?></div>
+                        <div class="task-meta">
+                          <span>Assigned: <?php echo h($assignedLabel); ?></span>
+                          <span class="dot">•</span>
+                          <span>Due: <?php echo h($dueLabel); ?></span>
+                        </div>
+                      </div>
+
+                      <div class="task-status">
+                        <span class="<?php echo h($pillClass); ?>"><?php echo h($statusLabel); ?></span>
+                      </div>
+
+                      <div class="task-arrow">›</div>
+                    </div>
+
+                  <?php endforeach; ?>
+                </div>
+              <?php endif; ?>
+
             </div>
 
           </div><!-- /member-grid -->

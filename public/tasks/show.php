@@ -12,7 +12,9 @@ $pdo = $pdo ?? get_pdo();
 $projectId = (int)($_GET['id'] ?? 0);
 if ($projectId <= 0) redirect('projects/index.php');
 
-$companyId = (int)current_company_id();
+$debug = (($_GET['debug'] ?? '') === '1');
+
+$companyId = current_company_id();
 
 // Project security
 $pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :id AND company_id = :cid");
@@ -23,7 +25,7 @@ if (!$project) redirect('projects/index.php');
 $pageTitle = $project['title'] . ' — Team — Vidhaan';
 require_once $root . '/includes/header.php';
 
-// countdown
+// countdown (same as show.php)
 $first = null;
 try {
   $evt = $pdo->prepare("SELECT starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC LIMIT 1");
@@ -63,7 +65,7 @@ function task_cat_label(string $cat): string {
     'followups'  => 'Follow ups',
     'rsvp'       => 'Follow ups',
     'transport'  => 'Pick ups',
-    'hospitality'=> 'Hotel & hospitality',
+    'hospitality'=> 'Accommodation',
     'vendors'    => 'Deliveries',
     'guest_list' => 'Guest list',
     'general'    => 'Task',
@@ -87,7 +89,9 @@ function task_cat_icon(string $cat): string {
   return $map[$cat] ?? '☑️';
 }
 
-// ---------------- Members (workstreams) ----------------
+/* -----------------------------
+   Members (for workstreams card)
+------------------------------ */
 $members = [];
 try {
   $mstmt = $pdo->prepare("
@@ -113,7 +117,9 @@ try {
 }
 $membersCount = count($members);
 
-// ---------------- Recent updates ----------------
+/* -----------------------------
+   Recent updates
+------------------------------ */
 $updates = [];
 try {
   $u = $pdo->prepare("
@@ -135,28 +141,17 @@ try {
   $updates = [];
 }
 
-// ---------------- Tasks (counts + list) ----------------
-$tasksTableExists = false;
+/* -----------------------------
+   Tasks (counts + list)
+------------------------------ */
+$tasksModuleMissing = false;
+$tasksError = '';
 $dbName = '';
-$taskDebug = [
-  'db' => '',
-  'cid' => $companyId,
-  'pid' => $projectId,
-  'tasks_pid' => 0,
-  'tasks_cid_pid' => 0,
-  'error' => '',
-];
 
 try {
   $dbName = (string)($pdo->query("SELECT DATABASE()")->fetchColumn() ?: '');
-  $taskDebug['db'] = $dbName;
-} catch (Throwable $e) {}
-
-try {
-  $q = $pdo->query("SHOW TABLES LIKE 'tasks'");
-  $tasksTableExists = (bool)$q->fetchColumn();
 } catch (Throwable $e) {
-  $tasksTableExists = false;
+  $dbName = '';
 }
 
 $openTasks = 0;
@@ -164,45 +159,63 @@ $dueSoon   = 0;
 $overdue   = 0;
 $taskRows  = [];
 
-if ($tasksTableExists) {
-  try {
-    // Debug: how many tasks exist for this project (ignoring company_id)
-    $c1 = $pdo->prepare("SELECT COUNT(*) FROM tasks WHERE project_id = :pid");
-    $c1->execute([':pid' => $projectId]);
-    $taskDebug['tasks_pid'] = (int)$c1->fetchColumn();
+try {
+  // If tasks table doesn't exist, this will throw SQLSTATE 42S02
+  $pdo->query("SELECT 1 FROM tasks LIMIT 1");
 
-    // Debug: how many match company+project
-    $c2 = $pdo->prepare("SELECT COUNT(*) FROM tasks WHERE company_id = :cid AND project_id = :pid");
-    $c2->execute([':cid' => $companyId, ':pid' => $projectId]);
-    $taskDebug['tasks_cid_pid'] = (int)$c2->fetchColumn();
+  // 1) Counts (strict: company + project)
+  $cs = $pdo->prepare("
+    SELECT
+      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed' THEN 1 ELSE 0 END) AS open_tasks,
+      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
+                 AND due_on IS NOT NULL
+                 AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
+      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
+                 AND due_on IS NOT NULL
+                 AND due_on >= CURDATE()
+                 AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
+    FROM tasks
+    WHERE company_id = :cid AND project_id = :pid
+  ");
+  $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
+  $row = $cs->fetch() ?: [];
+  $openTasks = (int)($row['open_tasks'] ?? 0);
+  $overdue   = (int)($row['overdue_tasks'] ?? 0);
+  $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
 
-    // counts (company+project)
-    $cs = $pdo->prepare("
-      SELECT
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed' THEN 1 ELSE 0 END) AS open_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
-                   AND due_on IS NOT NULL
-                   AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
-                   AND due_on IS NOT NULL
-                   AND due_on >= CURDATE()
-                   AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
-      FROM tasks
-      WHERE company_id = :cid AND project_id = :pid
-    ");
-    $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
-    $row = $cs->fetch() ?: [];
-    $openTasks = (int)($row['open_tasks'] ?? 0);
-    $overdue   = (int)($row['overdue_tasks'] ?? 0);
-    $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
+  // 2) Latest tasks list (strict: company + project)
+  $ts = $pdo->prepare("
+    SELECT
+      t.id,
+      t.category,
+      t.title,
+      t.due_on,
+      t.assigned_on,
+      t.status,
+      t.assigned_to_company_member_id AS assignee_cmid,
+      COALESCE(cm.full_name, 'Unassigned') AS assignee_name
+    FROM tasks t
+    LEFT JOIN company_members cm
+      ON cm.id = t.assigned_to_company_member_id
+     AND cm.company_id = :cid
+    WHERE t.company_id = :cid
+      AND t.project_id = :pid
+    ORDER BY t.created_at DESC
+    LIMIT 12
+  ");
+  $ts->execute([':cid' => $companyId, ':pid' => $projectId]);
+  $taskRows = $ts->fetchAll() ?: [];
 
-    // list (company+project)
-    $ts = $pdo->prepare("
+  // Fallback:
+  // If your tasks were saved with a wrong/missing company_id, still show them (project is already secured by company).
+  if (!$taskRows) {
+    $ts2 = $pdo->prepare("
       SELECT
         t.id,
         t.category,
         t.title,
         t.due_on,
+        t.assigned_on,
         t.status,
         t.assigned_to_company_member_id AS assignee_cmid,
         COALESCE(cm.full_name, 'Unassigned') AS assignee_name
@@ -210,41 +223,25 @@ if ($tasksTableExists) {
       LEFT JOIN company_members cm
         ON cm.id = t.assigned_to_company_member_id
        AND cm.company_id = :cid
-      WHERE t.company_id = :cid AND t.project_id = :pid
+      WHERE t.project_id = :pid
       ORDER BY t.created_at DESC
       LIMIT 12
     ");
-    $ts->execute([':cid' => $companyId, ':pid' => $projectId]);
-    $taskRows = $ts->fetchAll() ?: [];
-
-    // ✅ fallback if tasks exist but company_id filter doesn't match
-    if (!$taskRows && $taskDebug['tasks_pid'] > 0 && $taskDebug['tasks_cid_pid'] === 0) {
-      $ts2 = $pdo->prepare("
-        SELECT
-          t.id,
-          t.category,
-          t.title,
-          t.due_on,
-          t.status,
-          t.assigned_to_company_member_id AS assignee_cmid,
-          COALESCE(cm.full_name, 'Unassigned') AS assignee_name
-        FROM tasks t
-        LEFT JOIN company_members cm
-          ON cm.id = t.assigned_to_company_member_id
-        WHERE t.project_id = :pid
-        ORDER BY t.created_at DESC
-        LIMIT 12
-      ");
-      $ts2->execute([':pid' => $projectId]);
-      $taskRows = $ts2->fetchAll() ?: [];
-    }
-
-  } catch (Throwable $e) {
-    $taskDebug['error'] = $e->getMessage();
-    $openTasks = $dueSoon = $overdue = 0;
-    $taskRows = [];
+    $ts2->execute([':cid' => $companyId, ':pid' => $projectId]);
+    $taskRows = $ts2->fetchAll() ?: [];
   }
+
+} catch (PDOException $e) {
+  // Table missing?
+  if ($e->getCode() === '42S02') {
+    $tasksModuleMissing = true;
+  } else {
+    $tasksError = $e->getMessage();
+  }
+} catch (Throwable $e) {
+  $tasksError = $e->getMessage();
 }
+
 ?>
 
 <div class="app-shell">
@@ -264,6 +261,7 @@ if ($tasksTableExists) {
 
     <div class="surface">
 
+      <!-- Project header bar -->
       <div class="proj-top">
         <div class="proj-top-left">
           <div class="proj-icon">💍</div>
@@ -297,6 +295,13 @@ if ($tasksTableExists) {
             <div>
               <div class="proj-h2">Team overview</div>
               <div class="proj-sub">Everyone working on this event, what they own, and what’s due.</div>
+              <?php if ($debug): ?>
+                <div class="proj-sub" style="margin-top:6px;">
+                  <span style="color:var(--muted); font-size:12px;">
+                    Debug: DB=<?php echo h($dbName ?: '—'); ?> | company_id=<?php echo h((string)$companyId); ?> | project_id=<?php echo h((string)$projectId); ?> | tasks_loaded=<?php echo h((string)count($taskRows)); ?>
+                  </span>
+                </div>
+              <?php endif; ?>
             </div>
 
             <div class="proj-search">
@@ -305,6 +310,7 @@ if ($tasksTableExists) {
             </div>
           </div>
 
+          <!-- ✅ STATS ROW -->
           <div class="team-stats">
             <a class="team-stat team-stat--link" href="<?php echo h(base_url('projects/members.php?id=' . $projectId)); ?>">
               <div class="team-stat-left">
@@ -339,9 +345,11 @@ if ($tasksTableExists) {
             </div>
           </div>
 
+          <!-- 2-col grid -->
           <div class="team-grid">
 
             <div class="team-left">
+              <!-- Workstreams -->
               <div class="card">
                 <div class="proj-card-title">Team member’s workstreams</div>
                 <div class="proj-card-sub">Who owns what across the project.</div>
@@ -375,6 +383,7 @@ if ($tasksTableExists) {
                 <?php endif; ?>
               </div>
 
+              <!-- Recent updates -->
               <div class="card">
                 <div class="proj-card-title">Recent updates</div>
                 <div class="proj-card-sub">Latest team assignments for this project.</div>
@@ -403,32 +412,31 @@ if ($tasksTableExists) {
               </div>
             </div>
 
+            <!-- ✅ Task overview -->
             <div class="card task-overview-card">
               <div class="card-head">
                 <div>
                   <div class="card-head-title">Task overview</div>
                   <div class="card-head-sub">Latest tasks assigned in this project.</div>
-
-                  <!-- ✅ visible debug line (REMOVE later) -->
-                  <div style="margin-top:6px; font-size:12px; color:var(--muted);">
-                    DB: <?php echo h($taskDebug['db']); ?> |
-                    cid: <?php echo h((string)$taskDebug['cid']); ?> |
-                    pid: <?php echo h((string)$taskDebug['pid']); ?> |
-                    tasks(pid): <?php echo h((string)$taskDebug['tasks_pid']); ?> |
-                    tasks(cid+pid): <?php echo h((string)$taskDebug['tasks_cid_pid']); ?>
-                    <?php if (!empty($taskDebug['error'])): ?>
-                      <span style="color:#b00020;"> | ERROR: <?php echo h($taskDebug['error']); ?></span>
-                    <?php endif; ?>
-                  </div>
                 </div>
                 <a class="btn btn-ghost" href="#" onclick="return false;">Filter</a>
               </div>
 
-              <?php if (!$tasksTableExists): ?>
+              <?php if ($tasksModuleMissing): ?>
                 <div class="proj-empty" style="min-height:520px;">
                   <div class="proj-empty-ico">☑️</div>
                   <div class="proj-empty-title">Tasks aren’t set up yet</div>
                   <div class="proj-empty-sub">Create the tasks table and this section will auto-populate.</div>
+                </div>
+
+              <?php elseif ($tasksError !== ''): ?>
+                <div class="proj-empty" style="min-height:520px;">
+                  <div class="proj-empty-ico">⚠️</div>
+                  <div class="proj-empty-title">Couldn’t load tasks</div>
+                  <div class="proj-empty-sub"><?php echo h($tasksError); ?></div>
+                  <?php if (!$debug): ?>
+                    <div class="proj-empty-sub" style="margin-top:8px;">Tip: open this page with <code>?debug=1</code></div>
+                  <?php endif; ?>
                 </div>
 
               <?php elseif (!$taskRows): ?>
@@ -450,16 +458,13 @@ if ($tasksTableExists) {
                       $icon = task_cat_icon($cat);
                       $label = task_cat_label($cat);
                       $title = trim((string)($t['title'] ?? ''));
-
                       $due = (string)($t['due_on'] ?? '');
                       $dueLabel = $due ? date('d/m/Y', strtotime($due)) : '—';
-
                       $assignee = (string)($t['assignee_name'] ?? 'Unassigned');
                     ?>
 
-                    <a class="task-overview-row task-overview-row--click"
-                       href="<?php echo h(base_url('tasks/show.php?id=' . $taskId)); ?>"
-                       style="text-decoration:none; color:inherit;">
+                    <a class="task-overview-row"
+                       href="<?php echo h(base_url('tasks/show.php?id=' . $taskId)); ?>">
                       <div class="task-overview-ico"><?php echo h($icon); ?></div>
 
                       <div class="task-overview-main">
@@ -477,12 +482,14 @@ if ($tasksTableExists) {
                   <?php endforeach; ?>
                 </div>
               <?php endif; ?>
+
             </div>
 
           </div><!-- /team-grid -->
 
         </div><!-- /proj-main -->
       </div><!-- /project-shell -->
+
     </div><!-- /surface -->
   </section>
 </div>
