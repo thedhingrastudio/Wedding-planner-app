@@ -1,0 +1,25 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / tooling (if any)
+node_modules/
+
+# Logs
+*.log
+
+# Local env / secrets (adjust to your project)
+.env
+.env.*
+config/database.php
+config/app.php
+config/branding.php
+
+# Storage should not be committed (uploads, private docs)
+storage/
+!storage/.gitkeep
+
+# If you have vendor (Composer) and want to keep it out:
+# vendor/
