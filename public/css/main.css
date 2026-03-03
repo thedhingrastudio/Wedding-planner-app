@@ -2301,3 +2301,47 @@ body{
 @media (max-width: 1100px){
   .member-grid{ grid-template-columns: 1fr; }
 }
+
+/* ===== Tasks: Add & assign form ===== */
+.task-head h1{ margin:0; font-size:24px; }
+.task-head p{ margin:4px 0 0 0; color: var(--muted); font-size: 13px; }
+
+.task-card{ padding: 22px; }
+.task-form{ width:100%; }
+
+.task-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items:end;
+}
+
+.task-field .label{ font-size:12px; color: var(--muted); margin-bottom: 6px; }
+.task-help{ font-size:12px; color: var(--muted); margin-top: 6px; }
+
+.task-field--full{ grid-column: 1 / -1; }
+.task-textarea{
+  border-radius: 18px;
+  background: #f1f1f1;
+  padding: 14px;
+  resize: vertical;
+}
+
+.task-actions{
+  display:flex;
+  justify-content:flex-end;
+}
+.task-actions .btn{ padding: 12px 18px; }
+
+/* Priority pill feel */
+.task-priority{
+  border-radius: 999px;
+  background: rgba(255, 215, 140, 0.85);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+/* Responsive */
+@media (max-width: 1100px){
+  .task-grid{ grid-template-columns: 1fr; }
+  .task-actions{ justify-content:flex-start; }
+}
