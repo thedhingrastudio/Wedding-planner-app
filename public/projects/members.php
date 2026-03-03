@@ -231,12 +231,13 @@ $overdue = 0;
                     $rolesCsv = (string)($m['roles'] ?? '');
                     $roles = array_values(array_filter(array_map('trim', explode(',', $rolesCsv))));
 
-                    // tasks placeholder
                     $open = 0;
-                    $due = 0;
+                    $due  = 0;
 
                     $hay = strtolower($name . ' ' . $email . ' ' . $rolesCsv);
                     $rolesForAttr = strtolower(implode(',', $roles));
+
+                    $href = base_url('projects/member.php?id=' . $projectId . '&cmid=' . $cmid);
                   ?>
 
                   <div class="members-row"
@@ -244,8 +245,8 @@ $overdue = 0;
                        data-hay="<?php echo h($hay); ?>"
                        data-roles="<?php echo h($rolesForAttr); ?>">
 
-                    <!-- ✅ click overlay (whole row clickable, no blue/underline) -->
-                    <a class="row-hit" href="<?php echo h(base_url('projects/member.php?id=' . $projectId . '&cmid=' . $cmid)); ?>" aria-label="Open member"></a>
+                    <!-- ✅ The thing that actually navigates -->
+                    <a class="row-hit" href="<?php echo h($href); ?>" aria-label="Open member"></a>
 
                     <div class="members-cell members-name"><?php echo h($name); ?></div>
 
@@ -262,11 +263,11 @@ $overdue = 0;
                     </div>
 
                     <div class="members-cell members-center">
-                      <span class="task-pill task-pill--open"><?php echo h((string)$open); ?> open tasks</span>
+                      <span class="task-pill task-pill--open">0 open tasks</span>
                     </div>
 
                     <div class="members-cell members-center">
-                      <span class="task-pill task-pill--due"><?php echo h((string)$due); ?> due tasks</span>
+                      <span class="task-pill task-pill--due">0 due tasks</span>
                     </div>
 
                     <div class="members-cell members-arrow">›</div>
@@ -284,6 +285,7 @@ $overdue = 0;
   </section>
 </div>
 
+<!-- ✅ One clean script: filter only -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const roleFilter = document.querySelector("[data-role-filter]");
@@ -311,5 +313,25 @@ document.addEventListener("DOMContentLoaded", () => {
   apply();
 });
 </script>
+
+<!-- ✅ Inline CSS so it can’t “not load” -->
+<style>
+/* Make the overlay link cover the whole row */
+.members-row{ position: relative; }
+.row-hit{
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: block;
+}
+.members-row > :not(.row-hit){
+  position: relative;
+  z-index: 11;
+  pointer-events: none; /* click always hits the overlay link */
+}
+
+/* Prevent pills from wrapping vertically */
+.task-pill{ white-space: nowrap; }
+</style>
 
 <?php include $root . '/includes/footer.php'; ?>
