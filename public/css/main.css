@@ -2134,3 +2134,59 @@ body{
 @media (max-width: 1100px){
   .member-grid{ grid-template-columns: 1fr; }
 }
+
+/* Members table row: clickable overlay (prevents blue link + broken layout) */
+.members-row{ position: relative; }
+.row-hit{
+  position:absolute;
+  inset:0;
+  z-index:5;
+  text-decoration:none;
+}
+.members-row > :not(.row-hit){
+  position:relative;
+  z-index:2;
+  pointer-events:none;
+}
+.members-row:hover{ background: rgba(0,0,0,0.02); }
+
+/* Role dropdown + chips */
+.members-th-role{ display:flex; align-items:center; gap:10px; }
+.members-role-filter{
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:8px 10px;
+  background:#fff;
+  font-size:12px;
+  outline:none;
+}
+.members-role-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+.tag.tag--sm{ padding:6px 10px; font-size:12px; }
+
+/* Member detail page */
+.member-head{ margin: 6px 0 14px; }
+.member-h1{ font-size: 22px; font-weight: 850; }
+.member-sub{ color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.member-grid{
+  display:grid;
+  grid-template-columns: 360px minmax(0,1fr);
+  gap: 14px;
+  align-items:start;
+}
+
+.member-info-row{
+  display:grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+.member-info-row:first-of-type{ border-top: none; }
+.member-info-label{ color: var(--muted); font-size: 12px; }
+.member-info-val{ font-size: 13px; font-weight: 650; }
+.member-roles{ margin-top: 12px; display:flex; flex-wrap:wrap; gap: 8px; }
+
+@media (max-width: 1100px){
+  .member-grid{ grid-template-columns: 1fr; }
+}

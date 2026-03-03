@@ -7,11 +7,12 @@ while ($root !== dirname($root) && !is_dir($root . '/includes')) $root = dirname
 require_once $root . '/includes/app_start.php';
 require_login();
 
+$pdo = $pdo ?? get_pdo();
+
 $projectId = (int)($_GET['id'] ?? 0);
 if ($projectId <= 0) redirect('projects/index.php');
 
 $companyId = current_company_id();
-$pdo = $pdo ?? get_pdo();
 
 $pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :id AND company_id = :cid");
 $pstmt->execute([':id' => $projectId, ':cid' => $companyId]);
@@ -55,7 +56,6 @@ function role_label(string $role): string {
   return $map[$role] ?? ucfirst(str_replace('_', ' ', $role));
 }
 
-// Options used for dropdown filter
 $roleOptions = [
   'team_lead' => role_label('team_lead'),
   'coordination' => role_label('coordination'),
@@ -74,8 +74,7 @@ try {
       cm.full_name AS full_name,
       cm.email AS email,
       cm.status AS status,
-      GROUP_CONCAT(DISTINCT pm.role ORDER BY pm.role SEPARATOR ',') AS roles,
-      MIN(pm.created_at) AS assigned_at
+      GROUP_CONCAT(DISTINCT pm.role ORDER BY pm.role SEPARATOR ',') AS roles
     FROM project_members pm
     JOIN company_members cm
       ON cm.id = pm.company_member_id
@@ -94,14 +93,13 @@ try {
 
 $membersCount = count($members);
 
-// tasks not built yet — keep as 0 for now
+// tasks not built yet
 $openTasks = 0;
 $dueSoon = 0;
 $overdue = 0;
 ?>
 
 <div class="app-shell">
-
   <?php
     $nav_active = 'projects';
     require_once $root . '/includes/sidebar.php';
@@ -159,12 +157,10 @@ $overdue = 0;
 
             <div class="proj-search">
               <span class="proj-search-ico">⌕</span>
-              <!-- Use a page-specific selector to avoid conflicts -->
               <input class="proj-search-input" placeholder="Search team member" data-members-search />
             </div>
           </div>
 
-          <!-- Stats row -->
           <div class="team-stats">
             <div class="team-stat">
               <div class="team-stat-left">
@@ -199,13 +195,11 @@ $overdue = 0;
             </div>
           </div>
 
-          <!-- Main table only -->
           <div class="card members-main">
 
             <div class="members-table-head">
               <div>Member</div>
 
-              <!-- ✅ Role filter dropdown in header -->
               <div class="members-th-role">
                 <span>Roles</span>
                 <select class="members-role-filter" data-role-filter>
@@ -231,6 +225,7 @@ $overdue = 0;
               <div class="members-table-body">
                 <?php foreach ($members as $m): ?>
                   <?php
+                    $cmid = (int)($m['company_member_id'] ?? 0);
                     $name = (string)($m['full_name'] ?? 'Member');
                     $email = (string)($m['email'] ?? '');
                     $rolesCsv = (string)($m['roles'] ?? '');
@@ -240,45 +235,20 @@ $overdue = 0;
                     $open = 0;
                     $due = 0;
 
-                    // Used for filtering/search
                     $hay = strtolower($name . ' ' . $email . ' ' . $rolesCsv);
                     $rolesForAttr = strtolower(implode(',', $roles));
                   ?>
-                  <?php $cmid = (int)($m['company_member_id'] ?? 0); ?>
-<a class="members-row members-row--link"
-   href="<?php echo h(base_url('projects/member.php?id=' . $projectId . '&cmid=' . $cmid)); ?>"
-   data-members-row
-   data-hay="<?php echo h($hay); ?>"
-   data-roles="<?php echo h($rolesForAttr); ?>">
 
-  <div class="members-cell members-name"><?php echo h($name); ?></div>
+                  <div class="members-row"
+                       data-members-row
+                       data-hay="<?php echo h($hay); ?>"
+                       data-roles="<?php echo h($rolesForAttr); ?>">
 
-  <div class="members-cell members-role">
-    <div class="members-role-chips">
-      <?php if (!$roles): ?>
-        <span style="color:var(--muted); font-size:12px;">—</span>
-      <?php else: ?>
-        <?php foreach ($roles as $r): ?>
-          <span class="tag tag--sm"><?php echo h(role_label($r)); ?></span>
-        <?php endforeach; ?>
-      <?php endif; ?>
-    </div>
-  </div>
-
-  <div class="members-cell members-center">
-    <span class="task-pill task-pill--open"><?php echo h((string)$open); ?> open tasks</span>
-  </div>
-
-  <div class="members-cell members-center">
-    <span class="task-pill task-pill--due"><?php echo h((string)$due); ?> due tasks</span>
-  </div>
-
-  <div class="members-cell members-arrow">›</div>
-</a>
+                    <!-- ✅ click overlay (whole row clickable, no blue/underline) -->
+                    <a class="row-hit" href="<?php echo h(base_url('projects/member.php?id=' . $projectId . '&cmid=' . $cmid)); ?>" aria-label="Open member"></a>
 
                     <div class="members-cell members-name"><?php echo h($name); ?></div>
 
-                    <!-- ✅ Multiple roles as chips -->
                     <div class="members-cell members-role">
                       <div class="members-role-chips">
                         <?php if (!$roles): ?>
@@ -301,16 +271,16 @@ $overdue = 0;
 
                     <div class="members-cell members-arrow">›</div>
                   </div>
+
                 <?php endforeach; ?>
               </div>
             <?php endif; ?>
 
           </div>
 
-        </div><!-- /proj-main -->
-      </div><!-- /project-shell -->
-
-    </div><!-- /surface -->
+        </div>
+      </div>
+    </div>
   </section>
 </div>
 
@@ -320,25 +290,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.querySelector("[data-members-search]");
   const rows = Array.from(document.querySelectorAll("[data-members-row]"));
 
-  const applyFilters = () => {
+  const apply = () => {
     const role = (roleFilter?.value || "").trim().toLowerCase();
     const q = (searchInput?.value || "").trim().toLowerCase();
 
     rows.forEach((row) => {
       const hay = (row.getAttribute("data-hay") || "").toLowerCase();
       const roles = (row.getAttribute("data-roles") || "").toLowerCase();
+      const roleList = roles ? roles.split(",") : [];
 
       const matchSearch = !q || hay.includes(q);
-      const matchRole = !role || roles.split(",").includes(role);
+      const matchRole = !role || roleList.includes(role);
 
       row.style.display = (matchSearch && matchRole) ? "" : "none";
     });
   };
 
-  roleFilter?.addEventListener("change", applyFilters);
-  searchInput?.addEventListener("input", applyFilters);
-
-  applyFilters();
+  roleFilter?.addEventListener("change", apply);
+  searchInput?.addEventListener("input", apply);
+  apply();
 });
 </script>
 
