@@ -184,26 +184,23 @@ try {
   $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
 
   // 2) Latest tasks list (strict: company + project)
-  $ts = $pdo->prepare("
-    SELECT
-      t.id,
-      t.category,
-      t.title,
-      t.due_on,
-      t.assigned_on,
-      t.status,
-      t.assigned_to_company_member_id AS assignee_cmid,
-      COALESCE(cm.full_name, 'Unassigned') AS assignee_name
-    FROM tasks t
-    LEFT JOIN company_members cm
-      ON cm.id = t.assigned_to_company_member_id
-     AND cm.company_id = :cid
-    WHERE t.company_id = :cid
-      AND t.project_id = :pid
-    ORDER BY t.created_at DESC
-    LIMIT 12
-  ");
-  $ts->execute([':cid' => $companyId, ':pid' => $projectId]);
+  $t = $pdo->prepare("
+  SELECT
+    t.*,
+    p.title AS project_title,
+    cm.full_name AS assignee_name
+  FROM tasks t
+  LEFT JOIN projects p ON p.id = t.project_id AND p.company_id = :cid_p
+  LEFT JOIN company_members cm ON cm.id = t.assigned_to_company_member_id AND cm.company_id = :cid_cm
+  WHERE t.id = :id AND t.company_id = :cid_t
+  LIMIT 1
+");
+$t->execute([
+  ':id'     => $taskId,
+  ':cid_p'  => $companyId,
+  ':cid_cm' => $companyId,
+  ':cid_t'  => $companyId
+]);
   $taskRows = $ts->fetchAll() ?: [];
 
   // Fallback:
