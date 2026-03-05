@@ -9,53 +9,19 @@ require_login();
 
 $pdo = $pdo ?? get_pdo();
 
-$projectId = (int)($_GET['id'] ?? 0);
-if ($projectId <= 0) redirect('projects/index.php');
-
-$debug = (($_GET['debug'] ?? '') === '1');
-
-$companyId = current_company_id();
-
-// Project security
-$pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :id AND company_id = :cid");
-$pstmt->execute([':id' => $projectId, ':cid' => $companyId]);
-$project = $pstmt->fetch();
-if (!$project) redirect('projects/index.php');
-
-$pageTitle = $project['title'] . ' — Team — Vidhaan';
-require_once $root . '/includes/header.php';
-
-// countdown (same as show.php)
-$first = null;
-try {
-  $evt = $pdo->prepare("SELECT starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC LIMIT 1");
-  $evt->execute([':pid' => $projectId]);
-  $first = $evt->fetch();
-} catch (Throwable $e) {}
-
-$daysToGo = null;
-if ($first && !empty($first['starts_at'])) {
-  $d1 = new DateTimeImmutable(date('Y-m-d'));
-  $d2 = new DateTimeImmutable(substr((string)$first['starts_at'], 0, 10));
-  $daysToGo = (int)$d1->diff($d2)->format('%r%a');
-}
-
-$adminName = trim((string)($_SESSION['full_name'] ?? ''));
-if ($adminName === '') $adminName = 'Admin';
-
-$createdAt = (string)($project['created_at'] ?? '');
-$projectDateLabel = $createdAt ? date('F j, Y', strtotime($createdAt)) : 'Date TBD';
+function h0($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 function role_label(string $role): string {
   $map = [
-    'team_lead' => 'Team lead',
+    'team_lead'    => 'Team lead',
     'coordination' => 'Coordination',
-    'rsvp' => 'RSVP',
-    'hospitality' => 'Hospitality',
-    'transport' => 'Transport',
-    'vendor' => 'Vendor',
+    'rsvp'         => 'RSVP',
+    'hospitality'  => 'Hospitality',
+    'transport'    => 'Transport',
+    'vendor'       => 'Vendor',
+    'vendors'      => 'Vendor',
   ];
-  $role = trim($role);
+  $role = trim((string)$role);
   return $map[$role] ?? ucfirst(str_replace('_', ' ', $role));
 }
 
@@ -65,12 +31,12 @@ function task_cat_label(string $cat): string {
     'followups'  => 'Follow ups',
     'rsvp'       => 'Follow ups',
     'transport'  => 'Pick ups',
-    'hospitality'=> 'Accommodation',
+    'hospitality'=> 'Hotel & hospitality',
     'vendors'    => 'Deliveries',
     'guest_list' => 'Guest list',
     'general'    => 'Task',
   ];
-  $cat = strtolower(trim($cat));
+  $cat = strtolower(trim((string)$cat));
   return $map[$cat] ?? ucfirst(str_replace('_', ' ', $cat));
 }
 
@@ -85,160 +51,242 @@ function task_cat_icon(string $cat): string {
     'guest_list' => '🧾',
     'general'    => '☑️',
   ];
-  $cat = strtolower(trim($cat));
+  $cat = strtolower(trim((string)$cat));
   return $map[$cat] ?? '☑️';
 }
 
-/* -----------------------------
-   Members (for workstreams card)
------------------------------- */
+$taskId = (int)($_GET['id'] ?? 0);
+if ($taskId <= 0) redirect('projects/index.php');
+
+$companyId = current_company_id();
+
+// Load task + project (secure)
+$task = null;
+try {
+  $st = $pdo->prepare("
+    SELECT
+      t.*,
+      p.title AS project_title,
+      p.id    AS project_id,
+      COALESCE(cm.full_name, 'Unassigned') AS assignee_name
+    FROM tasks t
+    JOIN projects p
+      ON p.id = t.project_id
+     AND p.company_id = t.company_id
+    LEFT JOIN company_members cm
+      ON cm.id = t.assigned_to_company_member_id
+     AND cm.company_id = t.company_id
+    WHERE t.id = :tid
+      AND t.company_id = :cid
+    LIMIT 1
+  ");
+  $st->execute([':tid' => $taskId, ':cid' => $companyId]);
+  $task = $st->fetch() ?: null;
+} catch (Throwable $e) {
+  $task = null;
+}
+
+if (!$task) redirect('projects/index.php');
+
+$projectId = (int)($task['project_id'] ?? 0);
+$projectTitle = (string)($task['project_title'] ?? 'Project');
+
+$pageTitle = $projectTitle . ' — Task — Vidhaan';
+require_once $root . '/includes/header.php';
+
+$adminName = trim((string)($_SESSION['full_name'] ?? ''));
+if ($adminName === '') $adminName = 'Admin';
+
+// ------------------------------------------------------------
+// Fix the warning: project_sidebar.php expects $daysToGo
+// ------------------------------------------------------------
+$daysToGo = null;
+try {
+  $evt = $pdo->prepare("SELECT starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC LIMIT 1");
+  $evt->execute([':pid' => $projectId]);
+  $first = $evt->fetch();
+  if ($first && !empty($first['starts_at'])) {
+    $d1 = new DateTimeImmutable(date('Y-m-d'));
+    $d2 = new DateTimeImmutable(substr((string)$first['starts_at'], 0, 10));
+    $daysToGo = (int)$d1->diff($d2)->format('%r%a');
+  }
+} catch (Throwable $e) {}
+
+// teamCount (some sidebars use this)
+$teamCount = 0;
+try {
+  $tc = $pdo->prepare("
+    SELECT COUNT(DISTINCT
+      CASE
+        WHEN company_member_id IS NOT NULL THEN CONCAT('cm:', company_member_id)
+        WHEN user_id IS NOT NULL THEN CONCAT('u:', user_id)
+        WHEN email IS NOT NULL THEN CONCAT('e:', email)
+        ELSE CONCAT('row:', id)
+      END
+    ) AS c
+    FROM project_members
+    WHERE project_id = :pid
+  ");
+  $tc->execute([':pid' => $projectId]);
+  $teamCount = (int)($tc->fetchColumn() ?: 0);
+} catch (Throwable $e) { $teamCount = 0; }
+
+// ------------------------------------------------------------
+// KPI counts for tabs (Members / Open / Due soon / Overdue)
+// ------------------------------------------------------------
+$tasksTableExists = false;
+try {
+  $q = $pdo->query("SHOW TABLES LIKE 'tasks'");
+  $tasksTableExists = (bool)$q->fetchColumn();
+} catch (Throwable $e) {
+  $tasksTableExists = false;
+}
+
+$membersCount = 0;
+try {
+  $mc = $pdo->prepare("
+    SELECT COUNT(DISTINCT company_member_id)
+    FROM project_members
+    WHERE project_id = :pid
+      AND company_member_id IS NOT NULL
+  ");
+  $mc->execute([':pid' => $projectId]);
+  $membersCount = (int)($mc->fetchColumn() ?: 0);
+} catch (Throwable $e) { $membersCount = 0; }
+
+$openTasks = $dueSoon = $overdue = 0;
+if ($tasksTableExists) {
+  try {
+    $cs = $pdo->prepare("
+      SELECT
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done') THEN 1 ELSE 0 END) AS open_tasks,
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+                   AND due_on IS NOT NULL
+                   AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+                   AND due_on IS NOT NULL
+                   AND due_on >= CURDATE()
+                   AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
+      FROM tasks
+      WHERE company_id = :cid
+        AND project_id = :pid
+    ");
+    $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
+    $row = $cs->fetch() ?: [];
+    $openTasks = (int)($row['open_tasks'] ?? 0);
+    $overdue   = (int)($row['overdue_tasks'] ?? 0);
+    $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
+  } catch (Throwable $e) {}
+}
+
+// ------------------------------------------------------------
+// Team list (left card): members + roles + task counts
+// ------------------------------------------------------------
 $members = [];
 try {
   $mstmt = $pdo->prepare("
     SELECT
       pm.company_member_id,
-      cm.full_name AS full_name,
-      cm.email AS email,
+      cm.full_name,
       GROUP_CONCAT(DISTINCT pm.role ORDER BY pm.role SEPARATOR ',') AS roles
     FROM project_members pm
     JOIN company_members cm
       ON cm.id = pm.company_member_id
-     AND cm.company_id = :cid
+     AND cm.company_id = :cid_cm
     WHERE pm.project_id = :pid
       AND pm.company_member_id IS NOT NULL
       AND (cm.status = 'active' OR cm.status IS NULL)
-    GROUP BY pm.company_member_id, cm.full_name, cm.email
+    GROUP BY pm.company_member_id, cm.full_name
     ORDER BY cm.full_name ASC
   ");
-  $mstmt->execute([':pid' => $projectId, ':cid' => $companyId]);
+  $mstmt->execute([':pid' => $projectId, ':cid_cm' => $companyId]);
   $members = $mstmt->fetchAll() ?: [];
 } catch (Throwable $e) {
   $members = [];
 }
-$membersCount = count($members);
 
-/* -----------------------------
-   Recent updates
------------------------------- */
-$updates = [];
-try {
-  $u = $pdo->prepare("
-    SELECT
-      pm.role,
-      pm.created_at,
-      COALESCE(cm.full_name, pm.display_name, pm.email, CONCAT('Member #', pm.id)) AS name
-    FROM project_members pm
-    LEFT JOIN company_members cm
-      ON cm.id = pm.company_member_id
-     AND cm.company_id = :cid
-    WHERE pm.project_id = :pid
-    ORDER BY pm.created_at DESC
-    LIMIT 6
-  ");
-  $u->execute([':pid' => $projectId, ':cid' => $companyId]);
-  $updates = $u->fetchAll() ?: [];
-} catch (Throwable $e) {
-  $updates = [];
-}
-
-/* -----------------------------
-   Tasks (counts + list)
------------------------------- */
-$tasksModuleMissing = false;
-$tasksError = '';
-$dbName = '';
-
-try {
-  $dbName = (string)($pdo->query("SELECT DATABASE()")->fetchColumn() ?: '');
-} catch (Throwable $e) {
-  $dbName = '';
-}
-
-$openTasks = 0;
-$dueSoon   = 0;
-$overdue   = 0;
-$taskRows  = [];
-
-try {
-  // If tasks table doesn't exist, this will throw SQLSTATE 42S02
-  $pdo->query("SELECT 1 FROM tasks LIMIT 1");
-
-  // 1) Counts (strict: company + project)
-  $cs = $pdo->prepare("
-    SELECT
-      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed' THEN 1 ELSE 0 END) AS open_tasks,
-      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
-                 AND due_on IS NOT NULL
-                 AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
-      SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
-                 AND due_on IS NOT NULL
-                 AND due_on >= CURDATE()
-                 AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
-    FROM tasks
-    WHERE company_id = :cid AND project_id = :pid
-  ");
-  $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
-  $row = $cs->fetch() ?: [];
-  $openTasks = (int)($row['open_tasks'] ?? 0);
-  $overdue   = (int)($row['overdue_tasks'] ?? 0);
-  $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
-
-  // 2) Latest tasks list (strict: company + project)
-  $t = $pdo->prepare("
-  SELECT
-    t.*,
-    p.title AS project_title,
-    cm.full_name AS assignee_name
-  FROM tasks t
-  LEFT JOIN projects p ON p.id = t.project_id AND p.company_id = :cid_p
-  LEFT JOIN company_members cm ON cm.id = t.assigned_to_company_member_id AND cm.company_id = :cid_cm
-  WHERE t.id = :id AND t.company_id = :cid_t
-  LIMIT 1
-");
-$t->execute([
-  ':id'     => $taskId,
-  ':cid_p'  => $companyId,
-  ':cid_cm' => $companyId,
-  ':cid_t'  => $companyId
-]);
-  $taskRows = $ts->fetchAll() ?: [];
-
-  // Fallback:
-  // If your tasks were saved with a wrong/missing company_id, still show them (project is already secured by company).
-  if (!$taskRows) {
-    $ts2 = $pdo->prepare("
+$countsByMember = []; // open + due(soon)
+if ($tasksTableExists) {
+  try {
+    $ct = $pdo->prepare("
       SELECT
-        t.id,
-        t.category,
-        t.title,
-        t.due_on,
-        t.assigned_on,
-        t.status,
-        t.assigned_to_company_member_id AS assignee_cmid,
-        COALESCE(cm.full_name, 'Unassigned') AS assignee_name
-      FROM tasks t
-      LEFT JOIN company_members cm
-        ON cm.id = t.assigned_to_company_member_id
-       AND cm.company_id = :cid
-      WHERE t.project_id = :pid
-      ORDER BY t.created_at DESC
-      LIMIT 12
+        assigned_to_company_member_id AS cmid,
+        SUM(
+          CASE
+            WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+              AND (due_on IS NULL OR due_on >= CURDATE())
+            THEN 1 ELSE 0
+          END
+        ) AS open_cnt,
+        SUM(
+          CASE
+            WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+              AND due_on IS NOT NULL
+              AND due_on >= CURDATE()
+              AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+            THEN 1 ELSE 0
+          END
+        ) AS due_cnt
+      FROM tasks
+      WHERE company_id = :cid
+        AND project_id = :pid
+        AND assigned_to_company_member_id IS NOT NULL
+      GROUP BY assigned_to_company_member_id
     ");
-    $ts2->execute([':cid' => $companyId, ':pid' => $projectId]);
-    $taskRows = $ts2->fetchAll() ?: [];
-  }
-
-} catch (PDOException $e) {
-  // Table missing?
-  if ($e->getCode() === '42S02') {
-    $tasksModuleMissing = true;
-  } else {
-    $tasksError = $e->getMessage();
-  }
-} catch (Throwable $e) {
-  $tasksError = $e->getMessage();
+    $ct->execute([':cid' => $companyId, ':pid' => $projectId]);
+    foreach (($ct->fetchAll() ?: []) as $r) {
+      $cmid = (int)($r['cmid'] ?? 0);
+      $countsByMember[$cmid] = [
+        'open' => (int)($r['open_cnt'] ?? 0),
+        'due'  => (int)($r['due_cnt'] ?? 0),
+      ];
+    }
+  } catch (Throwable $e) {}
 }
 
+// Assignee highlight + role pill
+$assigneeId = (int)($task['assigned_to_company_member_id'] ?? 0);
+$assigneeName = (string)($task['assignee_name'] ?? 'Unassigned');
+
+$assigneeRolePill = '';
+try {
+  if ($assigneeId > 0) {
+    $rs = $pdo->prepare("
+      SELECT DISTINCT role
+      FROM project_members
+      WHERE project_id = :pid
+        AND company_member_id = :mid
+      ORDER BY role ASC
+      LIMIT 1
+    ");
+    $rs->execute([':pid' => $projectId, ':mid' => $assigneeId]);
+    $assigneeRole = (string)($rs->fetchColumn() ?: '');
+    if ($assigneeRole !== '') $assigneeRolePill = role_label($assigneeRole);
+  }
+} catch (Throwable $e) {}
+
+// ------------------------------------------------------------
+// Task fields for the form-like view
+// ------------------------------------------------------------
+$title = trim((string)($task['title'] ?? 'Untitled task'));
+$category = strtolower(trim((string)($task['category'] ?? 'general')));
+$priority = strtolower(trim((string)($task['priority'] ?? '')));
+$status   = strtolower(trim((string)($task['status'] ?? 'pending')));
+$desc     = trim((string)($task['description'] ?? ''));
+
+$assignedOn = (string)($task['assigned_on'] ?? '');
+$assignedLabel = $assignedOn ? date('d/m/Y', strtotime($assignedOn)) : '—';
+
+$dueOn = (string)($task['due_on'] ?? '');
+$dueLabel = $dueOn ? date('d/m/Y', strtotime($dueOn)) : '—';
+
+$progress = $status;
+if (in_array($progress, ['done'], true)) $progress = 'completed';
+if (!in_array($progress, ['pending','in_progress','completed','on_hold'], true)) $progress = 'pending';
+
+$prioLabel = $priority ? ucfirst($priority) : '—';
+$catLabel  = task_cat_label($category);
+$catIcon   = task_cat_icon($category);
 ?>
 
 <div class="app-shell">
@@ -251,32 +299,27 @@ $t->execute([
     <div class="topbar">
       <div></div>
       <div class="user-pill">
-        Admin: <?php echo h($adminName); ?>
-        <a class="logout" href="<?php echo h(base_url('logout.php')); ?>">Logout</a>
+        Admin: <?php echo h0($adminName); ?>
+        <a class="logout" href="<?php echo h0(base_url('logout.php')); ?>">Logout</a>
       </div>
     </div>
 
     <div class="surface">
 
-      <!-- Project header bar -->
       <div class="proj-top">
         <div class="proj-top-left">
           <div class="proj-icon">💍</div>
           <div>
-            <div class="proj-name"><?php echo h((string)$project['title']); ?></div>
+            <div class="proj-name"><?php echo h0($projectTitle); ?></div>
             <div class="proj-meta">
-              <span class="proj-meta-item">📅 <?php echo h($projectDateLabel); ?></span>
-              <?php if ($daysToGo !== null): ?>
-                <span class="proj-meta-item">• <?php echo h((string)$daysToGo); ?> days to go</span>
-              <?php endif; ?>
+              <span class="proj-meta-item">Task #<?php echo h0((string)$taskId); ?></span>
             </div>
           </div>
         </div>
 
         <div class="proj-top-actions">
-          <a class="btn btn-primary" href="<?php echo h(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-          <a class="btn" href="<?php echo h(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-          <a class="btn icon-btn" href="<?php echo h(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Contract & scope">⚙</a>
+          <a class="btn" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">← Back to tasks</a>
+          <a class="btn btn-primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
         </div>
       </div>
 
@@ -288,201 +331,148 @@ $t->execute([
 
         <div class="proj-main">
 
-          <div class="proj-overview-head">
-            <div>
-              <div class="proj-h2">Team overview</div>
-              <div class="proj-sub">Everyone working on this event, what they own, and what’s due.</div>
-              <?php if ($debug): ?>
-                <div class="proj-sub" style="margin-top:6px;">
-                  <span style="color:var(--muted); font-size:12px;">
-                    Debug: DB=<?php echo h($dbName ?: '—'); ?> | company_id=<?php echo h((string)$companyId); ?> | project_id=<?php echo h((string)$projectId); ?> | tasks_loaded=<?php echo h((string)count($taskRows)); ?>
-                  </span>
-                </div>
-              <?php endif; ?>
-            </div>
-
-            <div class="proj-search">
-              <span class="proj-search-ico">⌕</span>
-              <input class="proj-search-input" placeholder="Search team member" data-team-search />
-            </div>
-          </div>
-
-          <!-- ✅ STATS ROW -->
-          <div class="team-stats">
-            <a class="team-stat team-stat--link" href="<?php echo h(base_url('projects/members.php?id=' . $projectId)); ?>">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">👥</div>
-                <div class="team-stat-label">Members</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$membersCount); ?></div>
+          <!-- KPI tabs -->
+          <div class="team-stats" style="margin-top:6px;">
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/members.php?id=' . $projectId)); ?>">
+              <div class="team-stat-left"><div class="team-stat-ico">👥</div><div class="team-stat-label">Members</div></div>
+              <div class="team-stat-num"><?php echo h0((string)$membersCount); ?></div>
             </a>
 
-            <a class="team-stat team-stat--link" href="<?php echo h(base_url('tasks/index.php?project_id=' . $projectId)); ?>">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">☑️</div>
-                <div class="team-stat-label">Open tasks</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$openTasks); ?></div>
+            <a class="team-stat team-stat--link team-stat--active" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">
+              <div class="team-stat-left"><div class="team-stat-ico">☑️</div><div class="team-stat-label">Open tasks</div></div>
+              <div class="team-stat-num"><?php echo h0((string)$openTasks); ?></div>
             </a>
 
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">📅</div>
-                <div class="team-stat-label">Due soon</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$dueSoon); ?></div>
-            </div>
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=due_soon')); ?>">
+              <div class="team-stat-left"><div class="team-stat-ico">📅</div><div class="team-stat-label">Due soon</div></div>
+              <div class="team-stat-num"><?php echo h0((string)$dueSoon); ?></div>
+            </a>
 
-            <div class="team-stat">
-              <div class="team-stat-left">
-                <div class="team-stat-ico" aria-hidden="true">⚠️</div>
-                <div class="team-stat-label">Overdue tasks</div>
-              </div>
-              <div class="team-stat-num"><?php echo h((string)$overdue); ?></div>
-            </div>
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=overdue')); ?>">
+              <div class="team-stat-left"><div class="team-stat-ico">⚠️</div><div class="team-stat-label">Overdue tasks</div></div>
+              <div class="team-stat-num"><?php echo h0((string)$overdue); ?></div>
+            </a>
           </div>
 
-          <!-- 2-col grid -->
-          <div class="team-grid">
+          <div class="task-page-grid">
 
-            <div class="team-left">
-              <!-- Workstreams -->
-              <div class="card">
-                <div class="proj-card-title">Team member’s workstreams</div>
-                <div class="proj-card-sub">Who owns what across the project.</div>
-
-                <?php if (!$members): ?>
-                  <div class="proj-empty" style="min-height:240px;">
-                    <div class="proj-empty-ico">👥</div>
-                    <div class="proj-empty-title">No members assigned yet</div>
-                    <div class="proj-empty-sub">Assign members to this project to see workstreams here.</div>
-                  </div>
-                <?php else: ?>
-                  <div class="member-lines">
-                    <?php foreach ($members as $m): ?>
-                      <?php
-                        $name = (string)($m['full_name'] ?? 'Member');
-                        $rolesCsv = (string)($m['roles'] ?? '');
-                        $roles = array_values(array_filter(array_map('trim', explode(',', $rolesCsv))));
-                      ?>
-                      <div class="member-line">
-                        <div class="member-left">
-                          <div class="member-name"><?php echo h($name); ?></div>
-                        </div>
-                        <div class="member-tags">
-                          <?php foreach ($roles as $r): ?>
-                            <span class="tag"><?php echo h(role_label($r)); ?></span>
-                          <?php endforeach; ?>
-                        </div>
-                      </div>
-                    <?php endforeach; ?>
-                  </div>
-                <?php endif; ?>
+            <!-- LEFT: team list -->
+            <div class="card task-team-card">
+              <div class="task-team-head">
+                <div class="proj-card-title">The team</div>
+                <div class="proj-card-sub"><?php echo h0((string)$teamCount); ?> members</div>
               </div>
 
-              <!-- Recent updates -->
-              <div class="card">
-                <div class="proj-card-title">Recent updates</div>
-                <div class="proj-card-sub">Latest team assignments for this project.</div>
+              <div class="task-team-scroll">
+                <?php foreach ($members as $m): ?>
+                  <?php
+                    $cmid = (int)($m['company_member_id'] ?? 0);
+                    $name = (string)($m['full_name'] ?? 'Member');
+                    $rolesCsv = (string)($m['roles'] ?? '');
+                    $roles = array_values(array_filter(array_map('trim', explode(',', $rolesCsv))));
+                    $openCnt = (int)(($countsByMember[$cmid]['open'] ?? 0));
+                    $dueCnt  = (int)(($countsByMember[$cmid]['due'] ?? 0));
 
-                <?php if (!$updates): ?>
-                  <div class="proj-empty" style="min-height:220px;">
-                    <div class="proj-empty-ico">🧾</div>
-                    <div class="proj-empty-title">No recent updates</div>
-                    <div class="proj-empty-sub">New assignments will show up here.</div>
-                  </div>
-                <?php else: ?>
-                  <div class="updates-list">
-                    <?php foreach ($updates as $u): ?>
-                      <div class="update-row">
-                        <div class="update-ico">👤</div>
-                        <div class="update-text">
-                          <div class="update-title">
-                            <?php echo h((string)$u['name']); ?> added to <?php echo h(role_label((string)$u['role'])); ?>
-                          </div>
-                          <div class="update-sub"><?php echo h((string)$u['created_at']); ?></div>
-                        </div>
-                      </div>
-                    <?php endforeach; ?>
-                  </div>
-                <?php endif; ?>
+                    $isActive = ($assigneeId > 0 && $cmid === $assigneeId);
+                    $href = base_url('projects/member.php?id=' . $projectId . '&mid=' . $cmid);
+                  ?>
+                  <a class="task-team-row <?php echo $isActive ? 'task-team-row--active' : ''; ?>" href="<?php echo h0($href); ?>">
+                    <div class="task-team-name"><?php echo h0($name); ?></div>
+                    <div class="task-team-role"><?php echo h0($roles ? role_label($roles[0]) : ''); ?></div>
+
+                    <div class="task-team-tags">
+                      <?php foreach (array_slice($roles, 0, 2) as $r): ?>
+                        <span class="tag"><?php echo h0(role_label($r)); ?></span>
+                      <?php endforeach; ?>
+                      <?php if (count($roles) > 2): ?>
+                        <span class="tag">+<?php echo h0((string)(count($roles) - 2)); ?> more</span>
+                      <?php endif; ?>
+                    </div>
+
+                    <div class="task-team-mini">
+                      <span><?php echo h0((string)$openCnt); ?> open</span>
+                      <span class="dot">•</span>
+                      <span><?php echo h0((string)$dueCnt); ?> due</span>
+                    </div>
+                  </a>
+                <?php endforeach; ?>
               </div>
             </div>
 
-            <!-- ✅ Task overview -->
-            <div class="card task-overview-card">
-              <div class="card-head">
+            <!-- RIGHT: task details (form-like) -->
+            <div class="card task-detail-card">
+              <div class="task-detail-top">
                 <div>
-                  <div class="card-head-title">Task overview</div>
-                  <div class="card-head-sub">Latest tasks assigned in this project.</div>
-                </div>
-                <a class="btn btn-ghost" href="#" onclick="return false;">Filter</a>
-              </div>
-
-              <?php if ($tasksModuleMissing): ?>
-                <div class="proj-empty" style="min-height:520px;">
-                  <div class="proj-empty-ico">☑️</div>
-                  <div class="proj-empty-title">Tasks aren’t set up yet</div>
-                  <div class="proj-empty-sub">Create the tasks table and this section will auto-populate.</div>
-                </div>
-
-              <?php elseif ($tasksError !== ''): ?>
-                <div class="proj-empty" style="min-height:520px;">
-                  <div class="proj-empty-ico">⚠️</div>
-                  <div class="proj-empty-title">Couldn’t load tasks</div>
-                  <div class="proj-empty-sub"><?php echo h($tasksError); ?></div>
-                  <?php if (!$debug): ?>
-                    <div class="proj-empty-sub" style="margin-top:8px;">Tip: open this page with <code>?debug=1</code></div>
-                  <?php endif; ?>
-                </div>
-
-              <?php elseif (!$taskRows): ?>
-                <div class="proj-empty" style="min-height:520px;">
-                  <div class="proj-empty-ico">☑️</div>
-                  <div class="proj-empty-title">No tasks yet</div>
-                  <div class="proj-empty-sub">Add a task to this project to see it here.</div>
-                  <div style="margin-top:12px;">
-                    <a class="btn btn-primary" href="<?php echo h(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
+                  <div class="task-title">
+                    <?php echo h0($catLabel . ': ' . $title); ?>
+                  </div>
+                  <div class="task-sub">
+                    Assigned to: <strong><?php echo h0($assigneeName); ?></strong>
                   </div>
                 </div>
 
-              <?php else: ?>
-                <div class="task-overview-list">
-                  <?php foreach ($taskRows as $t): ?>
-                    <?php
-                      $taskId = (int)($t['id'] ?? 0);
-                      $cat = (string)($t['category'] ?? 'general');
-                      $icon = task_cat_icon($cat);
-                      $label = task_cat_label($cat);
-                      $title = trim((string)($t['title'] ?? ''));
-                      $due = (string)($t['due_on'] ?? '');
-                      $dueLabel = $due ? date('d/m/Y', strtotime($due)) : '—';
-                      $assignee = (string)($t['assignee_name'] ?? 'Unassigned');
-                    ?>
-
-                    <a class="task-overview-row"
-                       href="<?php echo h(base_url('tasks/show.php?id=' . $taskId)); ?>">
-                      <div class="task-overview-ico"><?php echo h($icon); ?></div>
-
-                      <div class="task-overview-main">
-                        <div class="task-overview-title"><?php echo h($label . ': ' . $title); ?></div>
-                        <div class="task-overview-sub">Due: <?php echo h($dueLabel); ?></div>
-                      </div>
-
-                      <div class="task-overview-right">
-                        <span class="task-overview-assignee"><?php echo h($assignee); ?></span>
-                      </div>
-
-                      <div class="task-overview-arrow">›</div>
-                    </a>
-
-                  <?php endforeach; ?>
+                <div class="task-badges">
+                  <?php if ($assigneeRolePill): ?>
+                    <span class="pill"><?php echo h0($assigneeRolePill); ?></span>
+                  <?php endif; ?>
+                  <span class="pill"><?php echo h0($catLabel); ?></span>
+                  <span class="pill"><?php echo h0($prioLabel); ?></span>
                 </div>
-              <?php endif; ?>
+              </div>
 
+              <div class="task-form">
+                <div class="task-form-row">
+                  <div class="task-field">
+                    <label>Assigned on</label>
+                    <div class="task-input"><?php echo h0($assignedLabel); ?></div>
+                  </div>
+                  <div class="task-field">
+                    <label>Due on</label>
+                    <div class="task-input"><?php echo h0($dueLabel); ?></div>
+                  </div>
+                </div>
+
+                <div class="task-field">
+                  <label>Description</label>
+                  <div class="task-textarea"><?php echo nl2br(h0($desc ?: '—')); ?></div>
+                </div>
+
+                <div class="task-form-row">
+                  <div class="task-field">
+                    <label>Assigned by</label>
+                    <div class="task-input"><?php echo h0($adminName); ?></div>
+                  </div>
+                  <div class="task-field">
+                    <label>Project</label>
+                    <div class="task-input"><?php echo h0($projectTitle); ?></div>
+                  </div>
+                </div>
+
+                <div class="task-bottom">
+                  <div class="task-progress">
+                    <div class="task-progress-label">Task progress</div>
+                    <div class="task-progress-pills">
+                      <span class="seg <?php echo $progress==='pending'?'seg--active':''; ?>">Pending</span>
+                      <span class="seg <?php echo $progress==='in_progress'?'seg--active':''; ?>">In Progress</span>
+                      <span class="seg <?php echo $progress==='completed'?'seg--active':''; ?>">Completed</span>
+                      <span class="seg <?php echo $progress==='on_hold'?'seg--active':''; ?>">On Hold</span>
+                    </div>
+                  </div>
+
+                  <div class="task-priority">
+                    <div class="task-progress-label">Priority</div>
+                    <span class="prio-pill"><?php echo h0($prioLabel); ?></span>
+                  </div>
+                </div>
+
+                <div class="task-actions">
+                  <a class="btn btn-danger-outline" href="<?php echo h0(base_url('tasks/delete.php?id=' . $taskId)); ?>">🗑 Delete Task</a>
+                  <a class="btn" href="<?php echo h0(base_url('tasks/edit.php?id=' . $taskId)); ?>">✎ Edit task</a>
+                </div>
+              </div>
             </div>
 
-          </div><!-- /team-grid -->
+          </div><!-- /task-page-grid -->
 
         </div><!-- /proj-main -->
       </div><!-- /project-shell -->

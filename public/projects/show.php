@@ -95,8 +95,11 @@ try {
   $teamCount = 0;
 }
 
-// tasks for Alerts card
+// tasks for Alerts card (latest 5 assigned tasks)
 $tasksTableExists = false;
+$alertTasks = [];
+$alertTasksError = '';
+
 try {
   $q = $pdo->query("SHOW TABLES LIKE 'tasks'");
   $tasksTableExists = (bool)$q->fetchColumn();
@@ -104,30 +107,73 @@ try {
   $tasksTableExists = false;
 }
 
-$alertTasks = [];
 if ($tasksTableExists) {
   try {
+    // Strict: company + project
     $ts = $pdo->prepare("
       SELECT
-        t.id, t.category, t.title, t.due_on,
+        t.id,
+        t.category,
+        t.title,
+        t.status,
+        t.priority,
+        t.assigned_on,
+        t.due_on,
         COALESCE(cm.full_name, 'Unassigned') AS assignee_name
       FROM tasks t
       LEFT JOIN company_members cm
         ON cm.id = t.assigned_to_company_member_id
-       AND cm.company_id = :cid
-      WHERE t.company_id = :cid
+       AND cm.company_id = :cid_join
+      WHERE t.company_id = :cid_where
         AND t.project_id = :pid
-        AND LOWER(COALESCE(t.status,'')) <> 'completed'
+        AND LOWER(COALESCE(t.status,'')) NOT IN ('completed','done')
       ORDER BY
-        CASE WHEN t.due_on IS NULL THEN 1 ELSE 0 END,
-        t.due_on ASC,
-        t.created_at DESC
-      LIMIT 6
+        CASE WHEN t.assigned_on IS NULL THEN 1 ELSE 0 END,
+        t.assigned_on DESC,
+        t.id DESC
+      LIMIT 5
     ");
-    $ts->execute([':cid' => $companyId, ':pid' => $projectId]);
+    $ts->execute([
+      ':cid_join'  => $companyId,
+      ':cid_where' => $companyId,
+      ':pid'       => $projectId
+    ]);
     $alertTasks = $ts->fetchAll() ?: [];
+
+    // Fallback: project only (if some old tasks have wrong/missing company_id)
+    if (!$alertTasks) {
+      $ts2 = $pdo->prepare("
+        SELECT
+          t.id,
+          t.category,
+          t.title,
+          t.status,
+          t.priority,
+          t.assigned_on,
+          t.due_on,
+          COALESCE(cm.full_name, 'Unassigned') AS assignee_name
+        FROM tasks t
+        LEFT JOIN company_members cm
+          ON cm.id = t.assigned_to_company_member_id
+         AND cm.company_id = :cid_join2
+        WHERE t.project_id = :pid2
+          AND LOWER(COALESCE(t.status,'')) NOT IN ('completed','done')
+        ORDER BY
+          CASE WHEN t.assigned_on IS NULL THEN 1 ELSE 0 END,
+          t.assigned_on DESC,
+          t.id DESC
+        LIMIT 5
+      ");
+      $ts2->execute([
+        ':cid_join2' => $companyId,
+        ':pid2'      => $projectId
+      ]);
+      $alertTasks = $ts2->fetchAll() ?: [];
+    }
+
   } catch (Throwable $e) {
     $alertTasks = [];
+    $alertTasksError = $e->getMessage();
   }
 }
 ?>
@@ -193,7 +239,7 @@ if ($tasksTableExists) {
 
           <div class="proj-grid">
 
-            <!-- Project phases (unchanged) -->
+            <!-- Project phases -->
             <div class="card proj-card">
               <div class="proj-card-title">Project phases</div>
               <div class="proj-card-sub">Track progress across the full workflow.</div>
@@ -246,7 +292,7 @@ if ($tasksTableExists) {
               </div>
             </div>
 
-            <!-- Alerts (NOW REAL TASKS) -->
+            <!-- Alerts -->
             <div class="card proj-card">
               <div class="proj-card-title">Alerts</div>
               <div class="proj-card-sub">Items that need a quick check or follow-up.</div>
@@ -258,50 +304,81 @@ if ($tasksTableExists) {
                   <div class="proj-empty-sub">Create the tasks table to see alerts here.</div>
                 </div>
 
-              <?php elseif (!$alertTasks): ?>
+              <?php elseif (empty($alertTasks)): ?>
                 <div class="proj-empty">
                   <div class="proj-empty-ico">📄</div>
                   <div class="proj-empty-title">No tasks created!</div>
                   <div class="proj-empty-sub">Pending tasks will show up here</div>
+
+                  <?php if (!empty($_GET['debug']) && $alertTasksError !== ''): ?>
+                    <div class="proj-empty-sub" style="margin-top:10px;color:#b00020;">
+                      Alerts SQL error: <?php echo h0($alertTasksError); ?>
+                    </div>
+                  <?php endif; ?>
+
                   <div style="margin-top:12px;">
                     <a class="btn btn-primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
                   </div>
                 </div>
 
               <?php else: ?>
-                <div class="task-overview-list">
+                <div class="alerts-scroll">
+                <div class="alerts-list">
                   <?php foreach ($alertTasks as $t): ?>
                     <?php
-                      $taskId = (int)($t['id'] ?? 0);
-                      $cat = (string)($t['category'] ?? 'general');
-                      $icon = task_cat_icon($cat);
-                      $label = task_cat_label($cat);
-                      $title = trim((string)($t['title'] ?? ''));
-                      $due = (string)($t['due_on'] ?? '');
-                      $dueLabel = $due ? date('d/m/Y', strtotime($due)) : '—';
+                      $taskId   = (int)($t['id'] ?? 0);
+                      $cat      = (string)($t['category'] ?? 'general');
+                      $icon     = task_cat_icon($cat);
+
+                      $title    = trim((string)($t['title'] ?? 'Untitled task'));
                       $assignee = (string)($t['assignee_name'] ?? 'Unassigned');
+
+                      $due = (string)($t['due_on'] ?? '');
+                      $dueLabel = $due ? date('d M', strtotime($due)) : 'No due date';
+
+                      $isOverdue = false;
+                      if ($due) {
+                        $isOverdue = strtotime(substr($due, 0, 10)) < strtotime(date('Y-m-d'));
+                      }
+
+                      $priority = strtolower((string)($t['priority'] ?? ''));
+                      $priorityLabel = $priority ? ucfirst($priority) : '';
                     ?>
-                    <div class="task-overview-row task-overview-row--click"
+
+                    <div class="alert-item <?php echo $isOverdue ? 'alert-item--overdue' : ''; ?>"
                          role="link"
                          tabindex="0"
                          data-task-row
                          data-href="<?php echo h0(base_url('tasks/show.php?id=' . $taskId)); ?>">
-                      <div class="task-overview-ico"><?php echo h0($icon); ?></div>
-                      <div class="task-overview-main">
-                        <div class="task-overview-title"><?php echo h0($label . ': ' . $title); ?></div>
-                        <div class="task-overview-sub">Due: <?php echo h0($dueLabel); ?></div>
+                      <div class="alert-ico"><?php echo h0($icon); ?></div>
+
+                      <div class="alert-body">
+                        <div class="alert-title"><?php echo h0($title); ?></div>
+                        <div class="alert-meta">
+                          <span><?php echo h0($assignee); ?></span>
+                          <span>•</span>
+                          <span><?php echo h0($dueLabel); ?></span>
+                          <?php if ($priorityLabel): ?>
+                            <span class="alert-pill"><?php echo h0($priorityLabel); ?></span>
+                          <?php endif; ?>
+                        </div>
                       </div>
-                      <div class="task-overview-right">
-                        <span class="task-overview-assignee"><?php echo h0($assignee); ?></span>
-                      </div>
+
                       <div class="task-overview-arrow">›</div>
                     </div>
                   <?php endforeach; ?>
                 </div>
+                          </div>
+                        
+
+                <div class="alerts-actions">
+  <a class="btn btn-primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
+  <a class="btn" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">Show all</a>
+</div>
               <?php endif; ?>
             </div>
 
-            <!-- Recent updates placeholder (unchanged) -->
+            <!-- Recent updates placeholder -->
             <div class="card proj-card proj-card--tall">
               <div class="proj-card-title">Recent updates</div>
               <div class="proj-card-sub">Latest changes across your team and guests.</div>
@@ -313,7 +390,7 @@ if ($tasksTableExists) {
               </div>
             </div>
 
-            <!-- Quick numbers (unchanged) -->
+            <!-- Quick numbers -->
             <div class="card proj-card proj-card--span2">
               <div class="proj-card-title">Quick numbers</div>
               <div class="proj-card-sub">Latest totals based on current responses.</div>

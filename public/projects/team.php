@@ -157,11 +157,11 @@ if (!$tasksModuleMissing) {
     // counts
     $cs = $pdo->prepare("
       SELECT
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed' THEN 1 ELSE 0 END) AS open_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done') THEN 1 ELSE 0 END) AS open_tasks,
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
                    AND due_on IS NOT NULL
                    AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) <> 'completed'
+        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
                    AND due_on IS NOT NULL
                    AND due_on >= CURDATE()
                    AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
@@ -174,7 +174,7 @@ if (!$tasksModuleMissing) {
     $overdue   = (int)($row['overdue_tasks'] ?? 0);
     $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
 
-    // ✅ latest tasks list (FIX: unique params so no HY093)
+    // latest tasks list (safe ordering)
     $ts = $pdo->prepare("
       SELECT
         t.id,
@@ -182,26 +182,27 @@ if (!$tasksModuleMissing) {
         t.title,
         t.due_on,
         t.status,
-        t.assigned_to_company_member_id AS assignee_cmid,
         COALESCE(cm.full_name, 'Unassigned') AS assignee_name
       FROM tasks t
       LEFT JOIN company_members cm
         ON cm.id = t.assigned_to_company_member_id
        AND cm.company_id = :cid_cm
       WHERE t.company_id = :cid_t
-        AND t.project_id = :pid
-      ORDER BY t.created_at DESC
+        AND t.project_id = :pid_t
+      ORDER BY
+        CASE WHEN t.assigned_on IS NULL THEN 1 ELSE 0 END,
+        t.assigned_on DESC,
+        t.id DESC
       LIMIT 12
     ");
     $ts->execute([
       ':cid_cm' => $companyId,
       ':cid_t'  => $companyId,
-      ':pid'    => $projectId
+      ':pid_t'  => $projectId
     ]);
     $taskRows = $ts->fetchAll() ?: [];
 
   } catch (Throwable $e) {
-    // if something fails, show empty (but no crashes)
     $taskRows = [];
     $openTasks = $dueSoon = $overdue = 0;
   }
@@ -266,7 +267,7 @@ if (!$tasksModuleMissing) {
             </div>
           </div>
 
-          <!-- Stats row -->
+          <!-- KPI tabs (ALL clickable) -->
           <div class="team-stats">
             <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/members.php?id=' . $projectId)); ?>">
               <div class="team-stat-left">
@@ -276,7 +277,7 @@ if (!$tasksModuleMissing) {
               <div class="team-stat-num"><?php echo h0((string)$membersCount); ?></div>
             </a>
 
-            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">
               <div class="team-stat-left">
                 <div class="team-stat-ico" aria-hidden="true">☑️</div>
                 <div class="team-stat-label">Open tasks</div>
@@ -284,21 +285,21 @@ if (!$tasksModuleMissing) {
               <div class="team-stat-num"><?php echo h0((string)$openTasks); ?></div>
             </a>
 
-            <div class="team-stat">
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=due_soon')); ?>">
               <div class="team-stat-left">
                 <div class="team-stat-ico" aria-hidden="true">📅</div>
                 <div class="team-stat-label">Due soon</div>
               </div>
               <div class="team-stat-num"><?php echo h0((string)$dueSoon); ?></div>
-            </div>
+            </a>
 
-            <div class="team-stat">
+            <a class="team-stat team-stat--link" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=overdue')); ?>">
               <div class="team-stat-left">
                 <div class="team-stat-ico" aria-hidden="true">⚠️</div>
                 <div class="team-stat-label">Overdue tasks</div>
               </div>
               <div class="team-stat-num"><?php echo h0((string)$overdue); ?></div>
-            </div>
+            </a>
           </div>
 
           <div class="team-grid">

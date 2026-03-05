@@ -2656,3 +2656,570 @@ body{
 .team-stat--link:hover{
   border-color: rgba(0,0,0,0.12);
 }
+
+/* Alerts list (Project overview) */
+.alerts-list{
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.alert-item{
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.alert-item--overdue{
+  border-color: #e7c7c7;
+  background: #fff9f9;
+}
+
+.alert-ico{
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: #fff;
+  flex: 0 0 auto;
+}
+
+.alert-title{
+  font-weight: 750;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.alert-meta{
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alert-pill{
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #fff;
+}
+
+.alerts-actions{
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+
+/* Alerts list (Project overview) */
+.alerts-list{
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+.alert-item{
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+}
+.alert-item--overdue{
+  border-color: #e7c7c7;
+  background: #fff9f9;
+}
+.alert-ico{
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: #fff;
+  flex: 0 0 auto;
+}
+.alert-title{
+  font-weight: 750;
+  font-size: 13px;
+  line-height: 1.25;
+}
+.alert-meta{
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alert-pill{
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #fff;
+}
+.alerts-actions{
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+/* Alerts card: keep height fixed and scroll inside */
+.alerts-scroll{
+  margin-top: 12px;
+  max-height: 320px;           /* tweak: 280–360 based on your layout */
+  overflow-y: auto;
+  padding-right: 6px;          /* makes room for scrollbar */
+}
+
+/* optional: nicer scrollbar (works on modern browsers) */
+.alerts-scroll::-webkit-scrollbar{
+  width: 8px;
+}
+.alerts-scroll::-webkit-scrollbar-thumb{
+  border-radius: 999px;
+  background: rgba(0,0,0,0.18);
+}
+.alerts-scroll::-webkit-scrollbar-track{
+  background: transparent;
+}
+.alerts-actions{
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+.alerts-actions .btn{
+  white-space: nowrap;
+}
+
+.alerts-actions{
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Open tasks page */
+.kpi-card--link{ text-decoration:none; color:inherit; display:block; }
+.kpi-card--active{ border:1px solid rgba(160,80,110,0.25); background: rgba(160,80,110,0.06); }
+
+.tasks-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.filter-dd summary{ list-style:none; cursor:pointer; }
+.filter-dd summary::-webkit-details-marker{ display:none; }
+
+.filter-form{
+  margin-top:10px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:#fff;
+  min-width: 320px;
+}
+
+.filter-grid{
+  display:grid;
+  gap:10px;
+}
+.filter-label{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.filter-form select{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#fff;
+}
+
+.filter-actions{
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+  margin-top:10px;
+}
+
+.open-tasks-scroll{
+  margin-top: 12px;
+  max-height: 560px;   /* gives the “scroll inside card” like your reference */
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.open-task-row{
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:#fff;
+  margin-bottom:10px;
+  cursor:pointer;
+}
+
+.open-task-ico{
+  width:36px;
+  height:36px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+}
+
+.open-task-title{ font-weight:750; font-size:14px; }
+.open-task-meta{
+  margin-top:4px;
+  font-size:12px;
+  color:var(--muted);
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.open-task-right{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.assignee-pill{
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:#f4f4f4;
+  white-space:nowrap;
+}
+
+.team-stat--active{
+  border: 1px solid rgba(160,80,110,0.25);
+  background: rgba(160,80,110,0.06);
+}
+
+/* Filter overlay (popover) on Open tasks */
+.task-list-card{ overflow: visible; }          /* important: prevents clipping */
+.tasks-header{ position: relative; }           /* anchor for the popover */
+.filter-dd{ position: relative; }
+
+.filter-dd[open] .filter-form{
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 50;
+
+  margin-top: 0;              /* remove flow spacing */
+  box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+}
+
+/* KPI tabs (Members / Open tasks / Due soon / Overdue) */
+.team-stat--link{
+  text-decoration: none;
+  color: inherit;
+  display: flex;            /* keeps full card clickable */
+}
+
+.team-stat--active{
+  border: 1px solid rgba(160,80,110,0.25);
+  background: rgba(160,80,110,0.06);
+}
+
+/* KPI tabs active + clickable */
+.team-stat--link{ text-decoration:none; color:inherit; display:flex; }
+.team-stat--active{
+  border: 1px solid rgba(160,80,110,0.25);
+  background: rgba(160,80,110,0.06);
+}
+
+/* Members table basic layout */
+.members-head, .members-row{
+  display:grid;
+  grid-template-columns: 2fr 2fr 1fr 1fr 20px;
+  gap: 12px;
+  align-items:center;
+  padding: 14px 16px;
+}
+.members-head{
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.members-row{ border-bottom: 1px solid rgba(0,0,0,0.06); }
+.members-name{ font-weight: 750; }
+.pill{
+  display:inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  background: #fff;
+}
+.pill--open{ background: #eef7ee; }
+.pill--due{ background: #fff3d6; }
+
+/* Filter overlay on Open Tasks */
+.task-list-card{ overflow: visible; }
+.tasks-header{ position: relative; display:flex; justify-content:space-between; gap:12px; }
+.filter-dd[open] .filter-form{
+  position:absolute;
+  right:0;
+  top: calc(100% + 10px);
+  z-index: 50;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+}
+
+
+/* Clickable member rows */
+.members-row--link{
+  text-decoration:none;
+  color:inherit;
+  display:grid;
+}
+.members-row--link:hover{
+  background: rgba(0,0,0,0.02);
+}
+
+/* Member detail layout */
+.member-detail-grid{
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 14px;
+}
+@media (max-width: 1100px){
+  .member-detail-grid{ grid-template-columns: 1fr; }
+}
+
+.kv{ margin-top: 10px; }
+.kv-row{
+  display:flex;
+  justify-content:space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.kv-row:last-child{ border-bottom: none; }
+.kv-key{ color: var(--muted); font-size: 12px; }
+.kv-val{ font-weight: 650; }
+
+/* Member tasks list */
+.member-tasks-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap: 12px;
+}
+.member-tasks-scroll{
+  margin-top: 12px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.member-task-row{
+  display:flex;
+  align-items:flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  margin-bottom: 10px;
+  text-decoration:none;
+  color:inherit;
+}
+.member-task-row:hover{ background: rgba(0,0,0,0.02); }
+.member-task-ico{
+  width: 36px;
+  height: 36px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+}
+.member-task-title{ font-weight: 750; }
+.member-task-sub{
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.member-task-sub .dot{ opacity: 0.7; }
+
+.status-pill{
+  margin-left:auto;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.status-pill--pending{ background:#f1f1f1; }
+.status-pill--due{ background:#ffe2e2; border-color:#f2c3c3; }
+.status-pill--completed{ background:#ddf3dd; border-color:#bfe3bf; }
+
+.open-task-row--link{
+  text-decoration: none;
+  color: inherit;
+  display: flex;       /* keep your existing row layout */
+}
+.open-task-row--link:hover{
+  background: rgba(0,0,0,0.02);
+}
+
+/* Task detail layout (Task page) */
+.task-page-grid{
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 14px;
+}
+@media (max-width: 1100px){
+  .task-page-grid{ grid-template-columns: 1fr; }
+}
+
+.task-team-card{ padding: 14px; }
+.task-team-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.task-team-scroll{
+  margin-top: 12px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.task-team-row{
+  display:block;
+  text-decoration:none;
+  color:inherit;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background:#fff;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.task-team-row:hover{ background: rgba(0,0,0,0.02); }
+.task-team-row--active{
+  border-color: rgba(160,80,110,0.35);
+  background: rgba(160,80,110,0.06);
+}
+.task-team-name{ font-weight: 750; }
+.task-team-role{ font-size: 12px; color: var(--muted); margin-top: 2px; }
+.task-team-tags{ margin-top: 8px; display:flex; gap:8px; flex-wrap:wrap; }
+.task-team-mini{ margin-top: 8px; font-size: 12px; color: var(--muted); display:flex; gap:8px; align-items:center; }
+.task-team-mini .dot{ opacity: .6; }
+
+.task-detail-card{ padding: 16px; }
+.task-detail-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.task-title{ font-size: 22px; font-weight: 800; }
+.task-sub{ margin-top: 4px; color: var(--muted); }
+.task-badges{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+.task-form{ margin-top: 14px; }
+.task-form-row{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+@media (max-width: 900px){
+  .task-form-row{ grid-template-columns: 1fr; }
+}
+.task-field label{
+  display:block;
+  font-size:12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.task-input{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f6f6f6;
+  font-size: 13px;
+}
+.task-textarea{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f6f6f6;
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 90px;
+}
+
+.task-bottom{
+  margin-top: 14px;
+  display:flex;
+  justify-content:space-between;
+  gap:14px;
+  align-items:flex-end;
+  flex-wrap:wrap;
+}
+.task-progress-label{ font-size:12px; color: var(--muted); margin-bottom: 8px; }
+.task-progress-pills{ display:flex; gap:10px; flex-wrap:wrap; }
+.seg{
+  border: 1px solid var(--border);
+  background: #eee;
+  color:#222;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.seg--active{
+  background:#111;
+  color:#fff;
+  border-color:#111;
+}
+
+.prio-pill{
+  display:inline-block;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #f5d77a;
+  border: 1px solid rgba(0,0,0,0.08);
+  font-size: 12px;
+}
+
+.task-actions{
+  margin-top: 16px;
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.btn-danger-outline{
+  border: 1px solid #ff4b4b;
+  color: #ff4b4b;
+  background: transparent;
+}
+.btn-danger-outline:hover{ background: rgba(255,75,75,0.08); }
