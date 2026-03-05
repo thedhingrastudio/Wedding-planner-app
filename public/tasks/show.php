@@ -248,6 +248,54 @@ if ($tasksTableExists) {
 $assigneeId = (int)($task['assigned_to_company_member_id'] ?? 0);
 $assigneeName = (string)($task['assignee_name'] ?? 'Unassigned');
 
+// Member info card (assignee details) - robust column mapping
+$assigneeEmail = '—';
+$assigneePhone = '—';
+
+// turn on debug by adding &debug=1 to the task URL
+$debug = isset($_GET['debug']) && $_GET['debug'] === '1';
+$memberInfoDebug = '';
+
+function pick_first_nonempty(array $row, array $keys, string $fallback = '—'): string {
+  foreach ($keys as $k) {
+    if (array_key_exists($k, $row)) {
+      $val = trim((string)$row[$k]);
+      if ($val !== '') return $val;
+    }
+  }
+  return $fallback;
+}
+
+try {
+  if ($assigneeId > 0) {
+    // grab all columns so we can adapt to your schema
+    $ms = $pdo->prepare("
+      SELECT *
+      FROM company_members
+      WHERE id = :mid AND company_id = :cid
+      LIMIT 1
+    ");
+    $ms->execute([':mid' => $assigneeId, ':cid' => $companyId]);
+    $mr = $ms->fetch() ?: null;
+
+    if ($mr) {
+      // try many common column names
+      $assigneeEmail = pick_first_nonempty($mr, ['email', 'email_address', 'mail'], '—');
+      $assigneePhone = pick_first_nonempty($mr, [
+        'phone', 'phone_number', 'mobile', 'mobile_number', 'contact', 'contact_number', 'phone_no', 'tel'
+      ], '—');
+
+      if ($debug) {
+        $memberInfoDebug = "company_members columns: " . implode(', ', array_keys($mr));
+      }
+    } else {
+      if ($debug) $memberInfoDebug = "No company_members row found for id={$assigneeId}, company_id={$companyId}";
+    }
+  }
+} catch (Throwable $e) {
+  if ($debug) $memberInfoDebug = "Member info SQL error: " . $e->getMessage();
+}
+
 $assigneeRolePill = '';
 try {
   if ($assigneeId > 0) {
@@ -356,121 +404,113 @@ $catIcon   = task_cat_icon($category);
 
           <div class="task-page-grid">
 
-            <!-- LEFT: team list -->
-            <div class="card task-team-card">
-              <div class="task-team-head">
-                <div class="proj-card-title">The team</div>
-                <div class="proj-card-sub"><?php echo h0((string)$teamCount); ?> members</div>
-              </div>
+  <!-- LEFT: task details -->
+  <div class="card task-detail-card">
+    <div class="task-detail-top">
+      <div>
+        <div class="task-title"><?php echo h0($catLabel . ': ' . $title); ?></div>
+        <div class="task-sub">
+          Assigned to: <strong><?php echo h0($assigneeName); ?></strong>
+        </div>
+      </div>
 
-              <div class="task-team-scroll">
-                <?php foreach ($members as $m): ?>
-                  <?php
-                    $cmid = (int)($m['company_member_id'] ?? 0);
-                    $name = (string)($m['full_name'] ?? 'Member');
-                    $rolesCsv = (string)($m['roles'] ?? '');
-                    $roles = array_values(array_filter(array_map('trim', explode(',', $rolesCsv))));
-                    $openCnt = (int)(($countsByMember[$cmid]['open'] ?? 0));
-                    $dueCnt  = (int)(($countsByMember[$cmid]['due'] ?? 0));
+      <div class="task-badges">
+        <?php if ($assigneeRolePill): ?>
+          <span class="pill"><?php echo h0($assigneeRolePill); ?></span>
+        <?php endif; ?>
+        <span class="pill"><?php echo h0($catLabel); ?></span>
+        <span class="pill"><?php echo h0($prioLabel); ?></span>
+      </div>
+    </div>
 
-                    $isActive = ($assigneeId > 0 && $cmid === $assigneeId);
-                    $href = base_url('projects/member.php?id=' . $projectId . '&mid=' . $cmid);
-                  ?>
-                  <a class="task-team-row <?php echo $isActive ? 'task-team-row--active' : ''; ?>" href="<?php echo h0($href); ?>">
-                    <div class="task-team-name"><?php echo h0($name); ?></div>
-                    <div class="task-team-role"><?php echo h0($roles ? role_label($roles[0]) : ''); ?></div>
+    <div class="task-form">
+      <div class="task-form-row">
+        <div class="task-field">
+          <label>Assigned on</label>
+          <div class="task-input"><?php echo h0($assignedLabel); ?></div>
+        </div>
+        <div class="task-field">
+          <label>Due on</label>
+          <div class="task-input"><?php echo h0($dueLabel); ?></div>
+        </div>
+      </div>
 
-                    <div class="task-team-tags">
-                      <?php foreach (array_slice($roles, 0, 2) as $r): ?>
-                        <span class="tag"><?php echo h0(role_label($r)); ?></span>
-                      <?php endforeach; ?>
-                      <?php if (count($roles) > 2): ?>
-                        <span class="tag">+<?php echo h0((string)(count($roles) - 2)); ?> more</span>
-                      <?php endif; ?>
-                    </div>
+      <div class="task-field">
+        <label>Description</label>
+        <div class="task-textarea"><?php echo nl2br(h0($desc ?: '—')); ?></div>
+      </div>
 
-                    <div class="task-team-mini">
-                      <span><?php echo h0((string)$openCnt); ?> open</span>
-                      <span class="dot">•</span>
-                      <span><?php echo h0((string)$dueCnt); ?> due</span>
-                    </div>
-                  </a>
-                <?php endforeach; ?>
-              </div>
-            </div>
+      <div class="task-form-row">
+        <div class="task-field">
+          <label>Assigned by</label>
+          <div class="task-input"><?php echo h0($adminName); ?></div>
+        </div>
+        <div class="task-field">
+          <label>Project</label>
+          <div class="task-input"><?php echo h0($projectTitle); ?></div>
+        </div>
+      </div>
 
-            <!-- RIGHT: task details (form-like) -->
-            <div class="card task-detail-card">
-              <div class="task-detail-top">
-                <div>
-                  <div class="task-title">
-                    <?php echo h0($catLabel . ': ' . $title); ?>
-                  </div>
-                  <div class="task-sub">
-                    Assigned to: <strong><?php echo h0($assigneeName); ?></strong>
-                  </div>
-                </div>
+      <div class="task-bottom">
+        <div class="task-progress">
+          <div class="task-progress-label">Task progress</div>
+          <div class="task-progress-pills">
+            <span class="seg <?php echo $progress==='pending'?'seg--active':''; ?>">Pending</span>
+            <span class="seg <?php echo $progress==='in_progress'?'seg--active':''; ?>">In Progress</span>
+            <span class="seg <?php echo $progress==='completed'?'seg--active':''; ?>">Completed</span>
+            <span class="seg <?php echo $progress==='on_hold'?'seg--active':''; ?>">On Hold</span>
+          </div>
+        </div>
 
-                <div class="task-badges">
-                  <?php if ($assigneeRolePill): ?>
-                    <span class="pill"><?php echo h0($assigneeRolePill); ?></span>
-                  <?php endif; ?>
-                  <span class="pill"><?php echo h0($catLabel); ?></span>
-                  <span class="pill"><?php echo h0($prioLabel); ?></span>
-                </div>
-              </div>
+        <div class="task-priority">
+          <div class="task-progress-label">Priority</div>
+          <span class="prio-pill"><?php echo h0($prioLabel); ?></span>
+        </div>
+      </div>
 
-              <div class="task-form">
-                <div class="task-form-row">
-                  <div class="task-field">
-                    <label>Assigned on</label>
-                    <div class="task-input"><?php echo h0($assignedLabel); ?></div>
-                  </div>
-                  <div class="task-field">
-                    <label>Due on</label>
-                    <div class="task-input"><?php echo h0($dueLabel); ?></div>
-                  </div>
-                </div>
+      <div class="task-actions">
+        <form class="task-actions-delete" method="post"
+      action="<?php echo h0(base_url('tasks/delete.php?id=' . $taskId)); ?>"
+      data-confirm-delete-form>
+  <button class="btn btn-danger-outline" type="submit">🗑 Delete Task</button>
+</form>
+        <a class="btn" href="<?php echo h0(base_url('tasks/edit.php?id=' . $taskId)); ?>">✎ Edit task</a>
+      </div>
+    </div>
+  </div>
 
-                <div class="task-field">
-                  <label>Description</label>
-                  <div class="task-textarea"><?php echo nl2br(h0($desc ?: '—')); ?></div>
-                </div>
+  <!-- RIGHT: member info (reference style) -->
+  <div class="card member-info-card">
+    <div class="member-info-title">Member information</div>
+    <div class="member-info-sub">Basic information about the member</div>
 
-                <div class="task-form-row">
-                  <div class="task-field">
-                    <label>Assigned by</label>
-                    <div class="task-input"><?php echo h0($adminName); ?></div>
-                  </div>
-                  <div class="task-field">
-                    <label>Project</label>
-                    <div class="task-input"><?php echo h0($projectTitle); ?></div>
-                  </div>
-                </div>
+    <?php if (!empty($memberInfoDebug)): ?>
+  <div class="proj-card-sub" style="margin-top:8px;color:#b00020;">
+    <?php echo h0($memberInfoDebug); ?>
+  </div>
+<?php endif; ?>
 
-                <div class="task-bottom">
-                  <div class="task-progress">
-                    <div class="task-progress-label">Task progress</div>
-                    <div class="task-progress-pills">
-                      <span class="seg <?php echo $progress==='pending'?'seg--active':''; ?>">Pending</span>
-                      <span class="seg <?php echo $progress==='in_progress'?'seg--active':''; ?>">In Progress</span>
-                      <span class="seg <?php echo $progress==='completed'?'seg--active':''; ?>">Completed</span>
-                      <span class="seg <?php echo $progress==='on_hold'?'seg--active':''; ?>">On Hold</span>
-                    </div>
-                  </div>
+    <div class="member-info-rows">
+      <div class="mi-row">
+        <div class="mi-key">Name</div>
+        <div class="mi-val"><?php echo h0($assigneeName); ?></div>
+      </div>
+      <div class="mi-row">
+        <div class="mi-key">Role</div>
+        <div class="mi-val"><?php echo h0($assigneeRolePill ?: '—'); ?></div>
+      </div>
+      <div class="mi-row">
+        <div class="mi-key">Phone</div>
+        <div class="mi-val"><?php echo h0($assigneePhone); ?></div>
+      </div>
+      <div class="mi-row">
+        <div class="mi-key">Email</div>
+        <div class="mi-val"><?php echo h0($assigneeEmail); ?></div>
+      </div>
+    </div>
+  </div>
 
-                  <div class="task-priority">
-                    <div class="task-progress-label">Priority</div>
-                    <span class="prio-pill"><?php echo h0($prioLabel); ?></span>
-                  </div>
-                </div>
-
-                <div class="task-actions">
-                  <a class="btn btn-danger-outline" href="<?php echo h0(base_url('tasks/delete.php?id=' . $taskId)); ?>">🗑 Delete Task</a>
-                  <a class="btn" href="<?php echo h0(base_url('tasks/edit.php?id=' . $taskId)); ?>">✎ Edit task</a>
-                </div>
-              </div>
-            </div>
+</div>
 
           </div><!-- /task-page-grid -->
 

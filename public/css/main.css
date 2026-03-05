@@ -3223,3 +3223,228 @@ body{
   background: transparent;
 }
 .btn-danger-outline:hover{ background: rgba(255,75,75,0.08); }
+
+/* =========================
+   Task details page styling
+   ========================= */
+
+.task-page-grid{
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1100px){
+  .task-page-grid{ grid-template-columns: 1fr; }
+}
+
+/* Left team card */
+.task-team-card{ padding: 14px; }
+.task-team-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap: 10px;
+}
+
+.task-team-scroll{
+  margin-top: 12px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.task-team-row{
+  display:block;
+  text-decoration: none !important;
+  color: inherit !important;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.task-team-row:hover{ background: rgba(0,0,0,0.02); }
+
+.task-team-row--active{
+  border-color: rgba(160,80,110,0.35);
+  background: rgba(160,80,110,0.06);
+}
+
+.task-team-name{ font-weight: 750; }
+.task-team-role{ font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.task-team-tags{
+  margin-top: 8px;
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-team-mini{
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  display:flex;
+  gap: 8px;
+  align-items:center;
+}
+
+.task-team-mini .dot{ opacity: .6; }
+
+/* Right detail card */
+.task-detail-card{ padding: 16px; }
+
+.task-detail-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.task-title{ font-size: 22px; font-weight: 800; }
+.task-sub{ margin-top: 4px; color: var(--muted); }
+
+.task-badges{
+  display:flex;
+  gap: 10px;
+  align-items:center;
+  flex-wrap: wrap;
+}
+
+.task-form{ margin-top: 14px; }
+
+.task-form-row{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px){
+  .task-form-row{ grid-template-columns: 1fr; }
+}
+
+.task-field label{
+  display:block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.task-input{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f6f6f6;
+  font-size: 13px;
+}
+
+.task-textarea{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f6f6f6;
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 90px;
+}
+
+.task-bottom{
+  margin-top: 14px;
+  display:flex;
+  justify-content:space-between;
+  gap: 14px;
+  align-items:flex-end;
+  flex-wrap: wrap;
+}
+
+.task-progress-label{
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.task-progress-pills{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.seg{
+  border: 1px solid var(--border);
+  background: #eee;
+  color:#222;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  user-select: none;
+}
+
+.seg--active{
+  background:#111;
+  color:#fff;
+  border-color:#111;
+}
+
+.prio-pill{
+  display:inline-block !important;
+  width:auto !important;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #f5d77a;
+  border: 1px solid rgba(0,0,0,0.08);
+  font-size: 12px;
+}
+
+.task-actions{
+  margin-top: 16px;
+  display:flex;
+  justify-content:flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* danger outline button (if not already present) */
+.btn-danger-outline{
+  border: 1px solid #ff4b4b !important;
+  color: #ff4b4b !important;
+  background: transparent !important;
+}
+
+.btn-danger-outline:hover{
+  background: rgba(255,75,75,0.08) !important;
+}
+
+/* Task page grid should be: details + member info (like reference) */
+.task-page-grid{
+  grid-template-columns: 1fr 340px !important;
+}
+
+@media (max-width: 1100px){
+  .task-page-grid{ grid-template-columns: 1fr !important; }
+}
+
+/* Member information card */
+.member-info-card{ padding: 16px !important; height: fit-content; }
+.member-info-title{ font-weight: 800; font-size: 16px; }
+.member-info-sub{ margin-top: 4px; color: var(--muted); font-size: 12px; }
+.member-info-rows{ margin-top: 12px; display: grid; gap: 10px; }
+.mi-row{ display:grid; grid-template-columns: 100px 1fr; gap: 10px; align-items:center; }
+.mi-key{ color: var(--muted); font-size: 12px; }
+.mi-val{ font-weight: 650; font-size: 13px; }
+
+
+
+.prio-select{
+  width: fit-content;
+  min-width: 150px;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #f5d77a;
+  border: 1px solid rgba(0,0,0,0.08);
+}

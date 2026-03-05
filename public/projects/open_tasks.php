@@ -93,7 +93,7 @@ try {
   $tasksTableExists = false;
 }
 
-// counts for KPI row
+// counts for KPI row (match what this module shows: assigned + open)
 $openTasks = 0;
 $dueSoon   = 0;
 $overdue   = 0;
@@ -102,22 +102,42 @@ if ($tasksTableExists) {
   try {
     $cs = $pdo->prepare("
       SELECT
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done') THEN 1 ELSE 0 END) AS open_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
-                   AND due_on IS NOT NULL
-                   AND due_on < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
-        SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
-                   AND due_on IS NOT NULL
-                   AND due_on >= CURDATE()
-                   AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_soon_tasks
+        SUM(
+          CASE
+            WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+              AND assigned_to_company_member_id IS NOT NULL
+              AND (due_on IS NULL OR due_on >= CURDATE())
+            THEN 1 ELSE 0
+          END
+        ) AS open_tasks,
+        SUM(
+          CASE
+            WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+              AND assigned_to_company_member_id IS NOT NULL
+              AND due_on IS NOT NULL
+              AND due_on >= CURDATE()
+              AND due_on <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+            THEN 1 ELSE 0
+          END
+        ) AS due_soon_tasks,
+        SUM(
+          CASE
+            WHEN LOWER(COALESCE(status,'')) NOT IN ('completed','done')
+              AND assigned_to_company_member_id IS NOT NULL
+              AND due_on IS NOT NULL
+              AND due_on < CURDATE()
+            THEN 1 ELSE 0
+          END
+        ) AS overdue_tasks
       FROM tasks
-      WHERE company_id = :cid_t AND project_id = :pid_t
+      WHERE company_id = :cid
+        AND project_id = :pid
     ");
-    $cs->execute([':cid_t' => $companyId, ':pid_t' => $projectId]);
+    $cs->execute([':cid' => $companyId, ':pid' => $projectId]);
     $row = $cs->fetch() ?: [];
     $openTasks = (int)($row['open_tasks'] ?? 0);
-    $overdue   = (int)($row['overdue_tasks'] ?? 0);
     $dueSoon   = (int)($row['due_soon_tasks'] ?? 0);
+    $overdue   = (int)($row['overdue_tasks'] ?? 0);
   } catch (Throwable $e) {}
 }
 

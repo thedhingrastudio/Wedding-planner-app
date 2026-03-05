@@ -149,3 +149,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+
+// ===== Confirm delete task =====
+document.addEventListener("submit", (e) => {
+  const form = e.target.closest("[data-confirm-delete-form]");
+  if (!form) return;
+
+  const ok = window.confirm("Delete this task?\n\nThis can’t be undone.");
+  if (!ok) e.preventDefault();
+});
