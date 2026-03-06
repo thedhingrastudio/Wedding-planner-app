@@ -46,7 +46,7 @@ $active = $active ?? 'overview';
   <div class="project-nav-group" role="list">
 
     <a class="project-nav-item project-nav-item--row <?php echo $active === 'contract' ? 'is-active' : ''; ?>"
-       href="#"
+       href="<?= h(base_url('projects/contract.php?id=' . (int)$projectId)) ?>"
        role="listitem"
        <?php echo $active === 'contract' ? 'aria-current="page"' : ''; ?>>
       <div class="project-nav-ico" aria-hidden="true">📄</div>
