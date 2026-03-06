@@ -14,729 +14,555 @@ if ($projectId <= 0) redirect('projects/index.php');
 
 $companyId = current_company_id();
 
-// Safe escape helper (your includes/functions.php already has h(), but many pages also use a local helper)
-function h0($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+/* ---------- helpers (DON'T use h0 here; it exists in project_sidebar.php) ---------- */
+function esc($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
-// Load project (company-safe)
-$pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :id AND company_id = :cid");
-$pstmt->execute([':id' => $projectId, ':cid' => $companyId]);
+function fmt_dt(?string $ts, string $format): string {
+  $ts = trim((string)$ts);
+  if ($ts === '') return '—';
+  $t = strtotime($ts);
+  if (!$t) return '—';
+  return date($format, $t);
+}
+
+/**
+ * Safely run scalar queries even if table/column doesn't exist.
+ * Returns null if query fails.
+ */
+function safe_fetch_scalar(PDO $pdo, string $sql, array $params): ?string {
+  try {
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    $val = $st->fetchColumn();
+    $val = is_string($val) ? trim($val) : (string)$val;
+    return $val !== '' ? $val : null;
+  } catch (Throwable $e) {
+    return null;
+  }
+}
+
+function max_timestamp(array $candidates): ?string {
+  $best = null;
+  $bestT = null;
+  foreach ($candidates as $c) {
+    $c = trim((string)$c);
+    if ($c === '') continue;
+    $t = strtotime($c);
+    if (!$t) continue;
+    if ($bestT === null || $t > $bestT) {
+      $bestT = $t;
+      $best = $c;
+    }
+  }
+  return $best;
+}
+
+/* ---------- Project ---------- */
+$pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :pid AND company_id = :cid LIMIT 1");
+$pstmt->execute([':pid' => $projectId, ':cid' => $companyId]);
 $project = $pstmt->fetch();
 if (!$project) redirect('projects/index.php');
 
-// Admin name
+/* ---------- Top meta ---------- */
 $adminName = trim((string)($_SESSION['full_name'] ?? ''));
 if ($adminName === '') $adminName = 'Admin';
 
-// Countdown (same pattern as your other project pages)
-$first = null;
+$firstEvent = null;
 try {
   $evt = $pdo->prepare("SELECT starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC LIMIT 1");
   $evt->execute([':pid' => $projectId]);
-  $first = $evt->fetch();
+  $firstEvent = $evt->fetch();
 } catch (Throwable $e) {}
 
 $daysToGo = null;
-if ($first && !empty($first['starts_at'])) {
+$topDateLabel = 'Date TBD';
+
+if ($firstEvent && !empty($firstEvent['starts_at'])) {
   $d1 = new DateTimeImmutable(date('Y-m-d'));
-  $d2 = new DateTimeImmutable(substr((string)$first['starts_at'], 0, 10));
+  $d2 = new DateTimeImmutable(substr((string)$firstEvent['starts_at'], 0, 10));
   $daysToGo = (int)$d1->diff($d2)->format('%r%a');
+  $topDateLabel = date('F j, Y', strtotime((string)$firstEvent['starts_at']));
+} else {
+  $createdAt = (string)($project['created_at'] ?? '');
+  if ($createdAt !== '') $topDateLabel = date('F j, Y', strtotime($createdAt));
 }
 
-// UI date label (your other pages use created_at as a fallback label)
-$createdAt = (string)($project['created_at'] ?? '');
-$projectDateLabel = $createdAt ? date('F j, Y', strtotime($createdAt)) : 'Date TBD';
-
-// Optional: team count (if sidebar uses it later)
+/* ---------- Team count (optional, for sidebar copy) ---------- */
 $teamCount = 0;
 try {
-  $tc = $pdo->prepare("
-    SELECT COUNT(DISTINCT
-      CASE
-        WHEN company_member_id IS NOT NULL THEN CONCAT('cm:', company_member_id)
-        WHEN user_id IS NOT NULL THEN CONCAT('u:', user_id)
-        WHEN email IS NOT NULL THEN CONCAT('e:', email)
-        ELSE CONCAT('row:', id)
-      END
-    ) AS c
-    FROM project_members
-    WHERE project_id = :pid
-  ");
+  $tc = $pdo->prepare("SELECT COUNT(*) FROM project_members WHERE project_id = :pid");
   $tc->execute([':pid' => $projectId]);
   $teamCount = (int)($tc->fetchColumn() ?: 0);
+} catch (Throwable $e) { $teamCount = 0; }
+
+/* ---------- Contract row (optional) ---------- */
+$contract = null;
+try {
+  $cs = $pdo->prepare("SELECT status, version_label, updated_at FROM contracts WHERE project_id = :pid ORDER BY id DESC LIMIT 1");
+  $cs->execute([':pid' => $projectId]);
+  $contract = $cs->fetch() ?: null;
 } catch (Throwable $e) {
-  $teamCount = 0;
+  $contract = null;
 }
 
-// Contract sub-section (used for sidebar highlight)
-$section = strtolower(trim((string)($_GET['section'] ?? 'status')));
-$validSections = [
-  'status','parties','client_responsibilities','event_details','services',
-  'staffing','notes','payment','cancellation','liability','changes'
-];
-if (!in_array($section, $validSections, true)) $section = 'status';
+$contractStatusRaw = strtolower(trim((string)($contract['status'] ?? 'draft')));
+$contractStatusLabel = $contractStatusRaw !== '' ? ucfirst(str_replace('_',' ', $contractStatusRaw)) : 'Draft';
+$versionLabel = trim((string)($contract['version_label'] ?? 'v0.1'));
+$versionBadge = $contractStatusLabel . ' • ' . ($versionLabel !== '' ? $versionLabel : 'v0.1');
 
-// Demo content (so it visually matches your reference right away)
-$demo = [
-  'draft_label'    => 'Draft • v0.3',
-  'client'         => 'Priya Mehra and Rahul Sharma',
-  'vendor'         => 'Trikaya',
-  'prepared_by'    => 'Vijay Sharma (Team lead)',
-  'last_updated'   => '12/02/2026',
-  'target_signoff' => '22/04/2026',
-];
+/* ---------- Contract status card values ---------- */
+$partner1 = trim((string)($project['partner1_name'] ?? ''));
+$partner2 = trim((string)($project['partner2_name'] ?? ''));
 
-$pageTitle = (string)$project['title'] . ' — Contract & scope — Vidhaan';
+$clientName = trim(($partner1 !== '' ? $partner1 : 'Partner 1') . ($partner2 !== '' ? ' and ' . $partner2 : ''));
+
+// Vendor = company name (best effort)
+$vendorName = 'Your company';
+try {
+  $vn = $pdo->prepare("SELECT name FROM companies WHERE id = :cid LIMIT 1");
+  $vn->execute([':cid' => $companyId]);
+  $tmp = trim((string)($vn->fetchColumn() ?? ''));
+  if ($tmp !== '') $vendorName = $tmp;
+} catch (Throwable $e) {}
+
+// Prepared by
+$preparedBy = trim((string)($_SESSION['full_name'] ?? ''));
+if ($preparedBy === '') $preparedBy = 'You';
+
+// Target sign-off = event date closest to today (fallback = first event)
+$signOffTs = null;
+try {
+  $closest = $pdo->prepare("
+    SELECT starts_at
+    FROM project_events
+    WHERE project_id = :pid AND starts_at IS NOT NULL
+    ORDER BY ABS(DATEDIFF(DATE(starts_at), CURDATE())) ASC, starts_at ASC
+    LIMIT 1
+  ");
+  $closest->execute([':pid' => $projectId]);
+  $row = $closest->fetch();
+  if ($row && !empty($row['starts_at'])) $signOffTs = (string)$row['starts_at'];
+} catch (Throwable $e) {}
+
+if ($signOffTs === null && $firstEvent && !empty($firstEvent['starts_at'])) {
+  $signOffTs = (string)$firstEvent['starts_at'];
+}
+$signOffLabel = fmt_dt($signOffTs, 'd/m/Y');
+
+// Last updated on (best effort across project + contract + events + tasks + members)
+$tsCandidates = [];
+$tsCandidates[] = (string)($project['updated_at'] ?? '');
+$tsCandidates[] = (string)($project['created_at'] ?? '');
+if ($contract && !empty($contract['updated_at'])) $tsCandidates[] = (string)$contract['updated_at'];
+
+$tsCandidates[] = safe_fetch_scalar($pdo, "SELECT MAX(updated_at) FROM project_events WHERE project_id = :pid", [':pid' => $projectId]);
+$tsCandidates[] = safe_fetch_scalar($pdo, "SELECT MAX(created_at) FROM project_events WHERE project_id = :pid", [':pid' => $projectId]);
+
+$tsCandidates[] = safe_fetch_scalar($pdo, "SELECT MAX(updated_at) FROM tasks WHERE company_id = :cid AND project_id = :pid", [':cid' => $companyId, ':pid' => $projectId]);
+$tsCandidates[] = safe_fetch_scalar($pdo, "SELECT MAX(created_at) FROM tasks WHERE company_id = :cid AND project_id = :pid", [':cid' => $companyId, ':pid' => $projectId]);
+
+$tsCandidates[] = safe_fetch_scalar($pdo, "SELECT MAX(created_at) FROM project_members WHERE project_id = :pid", [':pid' => $projectId]);
+
+$lastUpdatedTs = max_timestamp($tsCandidates);
+$lastUpdatedLabel = fmt_dt($lastUpdatedTs, 'd/m/Y, H:i');
+
+/* ---------- EVENT DETAILS ---------- */
+$eventTypeLabel = trim((string)($project['event_type'] ?? ''));
+if ($eventTypeLabel === '') $eventTypeLabel = '—';
+
+$eventNameLabel = trim((string)($project['title'] ?? ''));
+if ($eventNameLabel === '') {
+  $eventNameLabel = trim(($partner1 !== '' ? $partner1 : 'Partner 1') . ' weds ' . ($partner2 !== '' ? $partner2 : 'Partner 2'));
+}
+
+$guestCount = $project['guest_count_est'] ?? null;
+$guestCountLabel = ($guestCount === null || $guestCount === '') ? '—' : number_format((int)$guestCount);
+
+$events = [];
+try {
+  $es = $pdo->prepare("SELECT id, name, starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC, id ASC");
+  $es->execute([':pid' => $projectId]);
+  $events = $es->fetchAll() ?: [];
+} catch (Throwable $e) {
+  $events = [];
+}
+
+$eventNames = [];
+$minT = null; $maxT = null;
+
+foreach ($events as $e) {
+  $n = trim((string)($e['name'] ?? ''));
+  if ($n !== '') $eventNames[] = $n;
+
+  $st = trim((string)($e['starts_at'] ?? ''));
+  if ($st !== '') {
+    $t = strtotime($st);
+    if ($t) {
+      if ($minT === null || $t < $minT) $minT = $t;
+      if ($maxT === null || $t > $maxT) $maxT = $t;
+    }
+  }
+}
+
+$eventNames = array_values(array_unique($eventNames));
+$eventsLabel = $eventNames ? implode(', ', $eventNames) : '—';
+
+if ($minT === null) {
+  $eventDatesLabel = '—';
+} else {
+  $minLabel = date('F j, Y', $minT);
+  $maxLabel = ($maxT !== null) ? date('F j, Y', $maxT) : $minLabel;
+  $eventDatesLabel = ($minLabel === $maxLabel) ? $minLabel : ($minLabel . ' - ' . $maxLabel);
+}
+
+$pageTitle = (string)($project['title'] ?? 'Project') . ' — Contract & scope — Vidhaan';
 require_once $root . '/includes/header.php';
 ?>
 
 <style>
-/* Scoped styles for this page only */
-.contract-page{
-  padding: 18px 18px 28px;
-}
-
-.contract-surface{
-  background: rgba(255,255,255,0.92);
-  border-radius: 28px;
-  padding: 20px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-}
-
-.contract-topbar{
-  display:flex;
-  justify-content: space-between;
-  align-items:center;
-  margin-bottom: 14px;
-}
-
-.contract-user{
-  display:flex;
-  gap: 10px;
-  align-items:center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,0.08);
-  background: rgba(255,255,255,0.6);
-  font-size: 13px;
-}
-
-.contract-user a{
-  text-decoration:none;
-}
-
-.contract-project-head{
-  display:flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items:flex-start;
-  padding: 8px 6px 16px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  margin-bottom: 16px;
-}
-
-.contract-project-left{
-  display:flex;
-  gap: 12px;
-  align-items:center;
-}
-
-.contract-project-icon{
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  background: rgba(0,0,0,0.06);
-}
-
-.contract-project-title{
-  font-size: 26px;
-  font-weight: 800;
-  line-height: 1.1;
-}
-
-.contract-project-meta{
-  margin-top: 6px;
-  font-size: 13px;
-  opacity: 0.75;
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.contract-project-actions{
-  display:flex;
-  gap: 10px;
-  align-items:center;
-  flex-wrap: wrap;
-  justify-content:flex-end;
-}
-
-.contract-btn{
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,0.1);
-  background: rgba(255,255,255,0.75);
-  cursor:pointer;
-  font-size: 13px;
-  text-decoration:none;
-  color: inherit;
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-}
-
-.contract-btn.primary{
-  background: rgba(0,0,0,0.86);
-  color: #fff;
-  border-color: rgba(0,0,0,0.86);
-}
-
-.contract-btn.icon{
-  width: 40px;
-  height: 40px;
-  justify-content:center;
-  padding: 0;
-}
-
-.contract-shell{
-  display:grid;
-  grid-template-columns: 320px 1fr;
-  gap: 18px;
-  align-items:start;
-}
-
-.contract-left{
-  display:flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.contract-nav-card{
-  background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(0,0,0,0.07);
-  border-radius: 20px;
-  padding: 12px;
-}
-
-.contract-nav-item{
-  display:flex;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(0,0,0,0.06);
-  background: rgba(255,255,255,0.65);
-  text-decoration:none;
-  color: inherit;
-  margin-bottom: 10px;
-}
-
-.contract-nav-item:last-child{ margin-bottom: 0; }
-
-.contract-nav-item .ico{
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  background: rgba(0,0,0,0.06);
-  flex: 0 0 auto;
-}
-
-.contract-nav-item .txt{
-  min-width: 0;
-}
-
-.contract-nav-item .title{
-  font-weight: 800;
-  font-size: 14px;
-}
-
-.contract-nav-item .sub{
-  font-size: 12px;
-  opacity: 0.75;
-  margin-top: 2px;
-}
-
-.contract-nav-item.active{
-  border-color: rgba(0,0,0,0.10);
-  background: rgba(0,0,0,0.03);
-}
-
-.contract-substeps{
-  margin: 10px 0 0 46px;
-  display:grid;
-  gap: 10px;
-}
-
-.contract-step{
-  display:flex;
-  gap: 10px;
-  align-items:center;
-  padding: 8px 10px;
-  border-radius: 14px;
-  text-decoration:none;
-  color: inherit;
-  font-size: 13px;
-}
-
-.contract-step:hover{ background: rgba(0,0,0,0.03); }
-
-.contract-step .dot{
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: #1d6ff2;
-  color: #fff;
-  display:grid;
-  place-items:center;
-  font-size: 12px;
-}
-
-.contract-step.active{
-  background: rgba(0,0,0,0.04);
-}
-
-.contract-main{
-  min-width: 0;
-}
-
 .contract-head{
   display:flex;
-  justify-content: space-between;
-  gap: 14px;
   align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
   margin-bottom: 14px;
 }
-
-.contract-head-left .h1{
-  display:flex;
-  gap: 10px;
-  align-items:center;
-  flex-wrap: wrap;
-  font-size: 26px;
-  font-weight: 900;
+.contract-head .left h2{
+  margin:0;
+  font-size:22px;
+  font-weight:800;
 }
-
-.contract-pill{
-  font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,0.08);
-  background: rgba(255,255,255,0.6);
-  opacity: 0.9;
-}
-
-.contract-head-sub{
-  margin-top: 6px;
-  opacity: 0.75;
+.contract-head .left p{
+  margin:6px 0 0 0;
+  color: var(--muted);
   font-size: 13px;
 }
-
-.contract-head-actions{
-  display:flex;
-  gap: 10px;
+.contract-badge{
+  display:inline-flex;
   align-items:center;
-  flex-wrap: wrap;
-  justify-content:flex-end;
+  gap:8px;
+  margin-left:10px;
+  font-size:12px;
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius: 999px;
+  background:#fff;
+  color:#222;
+  vertical-align: middle;
 }
-
+.contract-actions{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.contract-actions .icon-btn{
+  width:38px;
+  height:38px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+}
 .contract-grid{
   display:grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.2fr 1fr 1fr;
   gap: 14px;
+  align-items:start;
 }
-
-.contract-card{
-  background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(0,0,0,0.07);
-  border-radius: 20px;
-  padding: 14px;
+@media (max-width: 1100px){
+  .contract-grid{ grid-template-columns: 1fr; }
 }
-
-.contract-card h3{
-  margin: 0;
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.contract-card p.meta{
-  margin: 6px 0 0;
-  font-size: 12px;
-  opacity: 0.72;
-}
-
 .kv{
-  margin-top: 12px;
-  display:grid;
-  gap: 8px;
-  font-size: 13px;
+  margin-top: 10px;
+  border-top: 1px solid rgba(0,0,0,0.06);
 }
-
 .kv-row{
   display:grid;
   grid-template-columns: 140px 1fr;
-  gap: 10px;
-  align-items:start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  font-size: 13px;
 }
-
-.kv-k{ opacity: 0.7; }
-.kv-v{ text-align:right; }
-
-.contract-actions-row{
+.kv-k{ color: var(--muted); }
+.kv-v{ text-align:right; font-weight:600; color:#222; }
+.kv-actions{
   display:flex;
   justify-content:flex-end;
   margin-top: 12px;
 }
-
-.contract-actions-row .contract-btn{
-  padding: 8px 12px;
-  font-size: 12px;
-}
-
-.link-list{
-  margin-top: 10px;
-  border-top: 1px solid rgba(0,0,0,0.07);
-}
-
-.link-row{
+.card-minh{ min-height: 130px; }
+.card-list a{
   display:flex;
-  justify-content: space-between;
   align-items:center;
+  justify-content:space-between;
   padding: 10px 0;
-  text-decoration:none;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
   color: inherit;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  text-decoration:none;
   font-size: 13px;
 }
+.card-list a:last-child{ border-bottom:none; }
+.card-list .chev{ color: var(--muted); }
 
-.link-row:last-child{ border-bottom:none; }
-.link-row .arr{ opacity: 0.6; }
-
-.bullets{
-  margin: 10px 0 0;
-  padding-left: 18px;
+/* Event details table */
+.ed-section{
+  margin-top: 12px;
+  font-weight: 800;
+  font-size: 13px;
+  color: #222;
+}
+.info-table{
+  margin-top: 8px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+.info-row{
+  display:grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
   font-size: 13px;
 }
-
-.muted{
-  opacity: 0.72;
-}
-
-@media (max-width: 1100px){
-  .contract-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 860px){
-  .contract-shell{ grid-template-columns: 1fr; }
-  .contract-grid{ grid-template-columns: 1fr; }
-  .kv-row{ grid-template-columns: 1fr; }
-  .kv-v{ text-align:left; }
+.info-k{ color: var(--muted); }
+.info-v{ color:#222; font-weight:600; }
+@media (max-width: 700px){
+  .info-row{ grid-template-columns: 1fr; }
 }
 </style>
 
-<div class="contract-page">
-  <div class="contract-surface">
+<div class="app-shell">
+  <?php
+    $nav_active = 'projects';
+    require_once $root . '/includes/sidebar.php';
+  ?>
 
-    <div class="contract-topbar">
+  <section class="app-main">
+    <div class="topbar">
       <div></div>
-      <div class="contract-user">
-        <span>Admin: <?php echo h0($adminName); ?></span>
-        <a href="<?php echo h0(base_url('logout.php')); ?>">Logout</a>
+      <div class="user-pill">
+        Admin: <?php echo esc($adminName); ?>
+        <a class="logout" href="<?php echo esc(base_url('logout.php')); ?>">Logout</a>
       </div>
     </div>
 
-    <!-- Project header -->
-    <div class="contract-project-head">
-      <div class="contract-project-left">
-        <div class="contract-project-icon" aria-hidden="true"></div>
-        <div>
-          <div class="contract-project-title"><?php echo h0((string)$project['title']); ?></div>
-          <div class="contract-project-meta">
-            <span><?php echo h0($projectDateLabel); ?></span>
-            <?php if ($daysToGo !== null): ?>
-              <span>• <?php echo h0((string)$daysToGo); ?> days to go</span>
-            <?php endif; ?>
+    <div class="surface">
+      <div class="proj-top">
+        <div class="proj-top-left">
+          <div class="proj-icon"></div>
+          <div>
+            <div class="proj-name"><?php echo esc((string)$project['title']); ?></div>
+            <div class="proj-meta">
+              <span class="proj-meta-item"><?php echo esc($topDateLabel); ?></span>
+              <?php if ($daysToGo !== null): ?>
+                <span class="proj-meta-item">• <?php echo esc((string)$daysToGo); ?> days to go</span>
+              <?php endif; ?>
+            </div>
           </div>
+        </div>
+
+        <div class="proj-top-actions">
+          <a class="btn btn-primary" href="<?php echo esc(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
+          <a class="btn" href="<?php echo esc(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
+          <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Contract & scope">⚙</a>
         </div>
       </div>
 
-      <div class="contract-project-actions">
-        <a class="contract-btn primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-        <a class="contract-btn" href="<?php echo h0(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-        <a class="contract-btn icon" href="<?php echo h0(base_url('projects/show.php?id=' . $projectId)); ?>" title="Project overview">⚙</a>
+      <div class="project-shell">
+        <?php
+          $active = 'contract';
+          require_once $root . '/includes/project_sidebar.php';
+        ?>
+
+        <div class="proj-main">
+          <div class="contract-head">
+            <div class="left">
+              <h2>
+                Contract &amp; scope
+                <span class="contract-badge"><?php echo esc($versionBadge); ?></span>
+              </h2>
+              <p>Create the agreement, define deliverables, and send it for approval.</p>
+            </div>
+
+            <div class="contract-actions">
+              <button class="btn icon-btn" type="button" title="Download">⬇</button>
+              <button class="btn icon-btn" type="button" title="Save">💾</button>
+              <button class="btn" type="button">👁 Preview PDF</button>
+              <button class="btn btn-primary" type="button">☆ Send for approval</button>
+            </div>
+          </div>
+
+          <div class="contract-grid">
+
+            <!-- Contract status -->
+            <div class="card proj-card">
+              <div class="proj-card-title">Contract status</div>
+              <div class="proj-card-sub">Track signing progress and key parties.</div>
+
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-k">Client:</div>
+                  <div class="kv-v"><?php echo esc($clientName); ?></div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-k">Vendor</div>
+                  <div class="kv-v"><?php echo esc($vendorName); ?></div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-k">Prepared by</div>
+                  <div class="kv-v"><?php echo esc($preparedBy); ?> (you)</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-k">Last updated on:</div>
+                  <div class="kv-v"><?php echo esc($lastUpdatedLabel); ?></div>
+                </div>
+                <div class="kv-row" style="border-bottom:none;">
+                  <div class="kv-k">Target sign-off</div>
+                  <div class="kv-v"><?php echo esc($signOffLabel); ?></div>
+                </div>
+              </div>
+
+              <div class="kv-actions">
+                <button class="btn" type="button">View version history</button>
+              </div>
+            </div>
+
+            <!-- Event details (reference style) -->
+            <div class="card proj-card">
+              <div class="proj-card-title">Event details</div>
+              <div class="proj-card-sub">Core event information for planning.</div>
+
+              <div class="ed-section">General information</div>
+              <div class="info-table">
+                <div class="info-row">
+                  <div class="info-k">Event type</div>
+                  <div class="info-v"><?php echo esc($eventTypeLabel); ?></div>
+                </div>
+                <div class="info-row">
+                  <div class="info-k">Event name</div>
+                  <div class="info-v"><?php echo esc($eventNameLabel); ?></div>
+                </div>
+                <div class="info-row">
+                  <div class="info-k">Event dates</div>
+                  <div class="info-v"><?php echo esc($eventDatesLabel); ?></div>
+                </div>
+                <div class="info-row" style="border-bottom:none;">
+                  <div class="info-k">Estimated guests</div>
+                  <div class="info-v"><?php echo esc($guestCountLabel); ?></div>
+                </div>
+              </div>
+
+              <div class="ed-section" style="margin-top:14px;">Events</div>
+              <div class="info-table">
+                <div class="info-row" style="border-bottom:none;">
+                  <div class="info-k">Event</div>
+                  <div class="info-v"><?php echo esc($eventsLabel); ?></div>
+                </div>
+              </div>
+
+              <div class="kv-actions">
+                <a class="btn" href="<?php echo h(base_url('projects/contract_event_details.php?id=' . $projectId)); ?>">Edit details</a>
+              </div>
+            </div>
+
+            <!-- Payment terms -->
+            <div class="card proj-card card-minh">
+              <div class="proj-card-title">Payment terms</div>
+              <div class="proj-card-sub">Total fee, milestones, and cancellation terms.</div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit payment schedule</button>
+              </div>
+            </div>
+
+            <!-- The rest of your cards can stay as-is (next we’ll wire them one by one) -->
+            <div class="card proj-card">
+              <div class="proj-card-title">Parties &amp; contacts</div>
+              <div class="proj-card-sub">Who is the agreement between</div>
+              <div style="margin-top: 10px; color: var(--muted); font-size:13px;">(We’ll wire this up next.)</div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit details</button>
+              </div>
+            </div>
+
+            <div class="card proj-card">
+              <div class="proj-card-title">Services provided</div>
+              <div class="proj-card-sub">What the planning team will deliver for this event.</div>
+              <div class="card-list" style="margin-top: 10px;">
+                <a href="#" onclick="return false;"><span>Consultation &amp; planning</span><span class="chev">›</span></a>
+                <a href="#" onclick="return false;"><span>Vendor coordination</span><span class="chev">›</span></a>
+                <a href="#" onclick="return false;"><span>Logistics &amp; on-ground coordination</span><span class="chev">›</span></a>
+              </div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">View &amp; edit services</button>
+              </div>
+            </div>
+
+            <div class="card proj-card">
+              <div class="proj-card-title">Cancellation policy</div>
+              <div class="proj-card-sub">Refund and cancellation terms</div>
+              <ul style="margin: 10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
+                <li>Cancellation <strong>30–90 days</strong> before the event: <strong>50%</strong> refundable (excluding deposit)</li>
+                <li>Cancellation <strong>less than 30 days</strong> before the wedding: No refund</li>
+                <li>Date changes: treated as rescheduling—charges may apply</li>
+              </ul>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit policy</button>
+              </div>
+            </div>
+
+            <div class="card proj-card">
+              <div class="proj-card-title">Client responsibilities</div>
+              <div class="proj-card-sub">Confirm dates, venue, and requirements on time.</div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit details</button>
+              </div>
+            </div>
+
+            <div class="card proj-card card-minh">
+              <div class="proj-card-title">Staffing plan</div>
+              <div class="proj-card-sub">Set the team size needed for execution.</div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit details</button>
+              </div>
+            </div>
+
+            <div class="card proj-card card-minh">
+              <div class="proj-card-title">Notes &amp; files</div>
+              <div class="proj-card-sub">Attach documents and keep internal notes.</div>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Upload files</button>
+              </div>
+            </div>
+
+            <div class="card proj-card">
+              <div class="proj-card-title">Liability &amp; force majeure</div>
+              <div class="proj-card-sub">Responsibility limits and uncontrollable events.</div>
+              <ul style="margin: 10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
+                <li>The service provider is not liable for issues caused by third-party vendors beyond agreed coordination.</li>
+                <li>Force majeure includes natural disasters, government restrictions, and unforeseen emergencies.</li>
+              </ul>
+              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+                <button class="btn" type="button">Edit clauses</button>
+              </div>
+            </div>
+
+            <div class="card proj-card">
+              <div class="proj-card-title">Change requests</div>
+              <div class="proj-card-sub">Track requested updates after the contract is shared.</div>
+              <div style="margin-top: 10px; color: var(--muted); font-size:13px;">
+                <ul style="margin:0 0 0 18px;">
+                  <li>No change requests yet.</li>
+                  <li>Change requests become available after the contract is sent.</li>
+                </ul>
+              </div>
+            </div>
+
+          </div>
+        </div>
       </div>
     </div>
-
-    <div class="contract-shell">
-
-      <!-- Left project sidebar (self-contained for this page to match your reference) -->
-      <aside class="contract-left">
-
-        <div class="contract-nav-card">
-          <a class="contract-nav-item" href="<?php echo h0(base_url('projects/show.php?id=' . $projectId)); ?>">
-            <div class="ico" aria-hidden="true"></div>
-            <div class="txt">
-              <div class="title"><?php echo h0(($daysToGo ?? 0) . ' days to go'); ?></div>
-              <div class="sub">Countdown to the big day!</div>
-            </div>
-          </a>
-
-          <a class="contract-nav-item" href="<?php echo h0(base_url('projects/team.php?id=' . $projectId)); ?>">
-            <div class="ico" aria-hidden="true"></div>
-            <div class="txt">
-              <div class="title">The team</div>
-              <div class="sub"><?php echo h0((string)$teamCount); ?> active members</div>
-            </div>
-          </a>
-
-          <a class="contract-nav-item active" href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId)); ?>">
-            <div class="ico" aria-hidden="true"></div>
-            <div class="txt">
-              <div class="title">Contract &amp; scope</div>
-              <div class="sub">Set the agreement, deliverables and key terms before planning begins</div>
-            </div>
-          </a>
-
-          <div class="contract-substeps">
-            <a class="contract-step <?php echo $section === 'status' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=status')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Contract status</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'parties' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=parties')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Parties &amp; contacts</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'client_responsibilities' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=client_responsibilities')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Client responsibilities</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'event_details' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=event_details')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Event details</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'services' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=services')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Services provided</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'staffing' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=staffing')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Staffing plans</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'notes' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=notes')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Notes &amp; files</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'payment' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=payment')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Payment terms</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'cancellation' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=cancellation')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Cancellation policy</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'liability' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=liability')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Liability &amp; force majeure</span>
-            </a>
-
-            <a class="contract-step <?php echo $section === 'changes' ? 'active' : ''; ?>"
-               href="<?php echo h0(base_url('projects/contract.php?id=' . $projectId . '&section=changes')); ?>">
-              <span class="dot" aria-hidden="true">✓</span>
-              <span>Change requests</span>
-            </a>
-          </div>
-        </div>
-
-        <div class="contract-nav-card">
-          <a class="contract-nav-item" href="#">
-            <div class="ico" aria-hidden="true"></div>
-            <div class="txt">
-              <div class="title">Guest list setup</div>
-              <div class="sub">Build the master guest list and organize it for invites and logistics</div>
-            </div>
-          </a>
-        </div>
-
-      </aside>
-
-      <!-- Main content -->
-      <main class="contract-main">
-
-        <div class="contract-head">
-          <div class="contract-head-left">
-            <div class="h1">
-              <span>Contract &amp; scope</span>
-              <span class="contract-pill"><?php echo h0($demo['draft_label']); ?></span>
-            </div>
-            <div class="contract-head-sub">Create the agreement, define deliverables, and send it for approval.</div>
-          </div>
-
-          <div class="contract-head-actions">
-            <button class="contract-btn icon" type="button" title="Download">⤓</button>
-            <button class="contract-btn icon" type="button" title="Save">💾</button>
-            <button class="contract-btn" type="button" title="Preview PDF">👁 Preview PDF</button>
-            <button class="contract-btn primary" type="button" title="Send for approval">☆ Send for approval</button>
-          </div>
-        </div>
-
-        <div class="contract-grid">
-
-          <!-- Column 1 -->
-          <section class="contract-card" id="status">
-            <h3>Contract status</h3>
-            <p class="meta">Track signing progress and key parties.</p>
-
-            <div class="kv">
-              <div class="kv-row"><div class="kv-k">Client:</div><div class="kv-v"><?php echo h0($demo['client']); ?></div></div>
-              <div class="kv-row"><div class="kv-k">Vendor</div><div class="kv-v"><?php echo h0($demo['vendor']); ?></div></div>
-              <div class="kv-row"><div class="kv-k">Prepared by</div><div class="kv-v"><?php echo h0($demo['prepared_by']); ?></div></div>
-              <div class="kv-row"><div class="kv-k">Last updated on:</div><div class="kv-v"><?php echo h0($demo['last_updated']); ?></div></div>
-              <div class="kv-row"><div class="kv-k">Target sign-off</div><div class="kv-v"><?php echo h0($demo['target_signoff']); ?></div></div>
-            </div>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">View version history</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="event_details">
-            <h3>Event details</h3>
-            <p class="meta">Dates, venue, and estimated guest count.</p>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit details</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="payment">
-            <h3>Payment terms</h3>
-            <p class="meta">Total fee, milestones, and cancellation terms.</p>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit payment schedule</a>
-            </div>
-          </section>
-
-          <!-- Column 2 -->
-          <section class="contract-card" id="parties">
-            <h3>Parties &amp; contacts</h3>
-            <p class="meta">Who is the agreement between</p>
-
-            <div class="kv">
-              <div class="kv-row"><div class="kv-k">Company</div><div class="kv-v">Trikaya</div></div>
-              <div class="kv-row"><div class="kv-k">Address</div><div class="kv-v">H-51, 1st Floor, Shivaji Park, New Delhi 110026</div></div>
-              <div class="kv-row"><div class="kv-k">Email</div><div class="kv-v">hello@trikaya.events</div></div>
-              <div class="kv-row"><div class="kv-k">Phone</div><div class="kv-v">+91 98XXXXXX12</div></div>
-            </div>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit details</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="services">
-            <h3>Services provided</h3>
-            <p class="meta">What the planning team will deliver for this event.</p>
-
-            <div class="link-list">
-              <a class="link-row" href="#"><span>Consultation &amp; planning</span><span class="arr">›</span></a>
-              <a class="link-row" href="#"><span>Vendor coordination</span><span class="arr">›</span></a>
-              <a class="link-row" href="#"><span>Logistics &amp; on-ground coordination</span><span class="arr">›</span></a>
-            </div>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">View &amp; edit services</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="cancellation">
-            <h3>Cancellation policy</h3>
-            <p class="meta">Refund and cancellation terms</p>
-
-            <ul class="bullets">
-              <li>Cancellation <strong>30–90 days</strong> before the event: <strong>50%</strong> of paid amount refundable (excluding deposit)</li>
-              <li>Cancellation <strong>less than 30 days</strong> before the wedding: No refund</li>
-              <li>Date changes: treated as rescheduling—charges may apply</li>
-            </ul>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit policy</a>
-            </div>
-          </section>
-
-          <!-- Column 3 -->
-          <section class="contract-card" id="client_responsibilities">
-            <h3>Client responsibilities</h3>
-            <p class="meta">Confirm dates, venue, and requirements on time.</p>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit details</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="staffing">
-            <h3>Staffing plan</h3>
-            <p class="meta">Set the team size needed for execution.</p>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit details</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="notes">
-            <h3>Notes &amp; files</h3>
-            <p class="meta">Attach documents and keep internal notes.</p>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Upload files</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="liability">
-            <h3>Liability &amp; force majeure</h3>
-            <p class="meta">Responsibility limits and uncontrollable events.</p>
-
-            <ul class="bullets">
-              <li>The service provider is not liable for issues caused by third-party vendors beyond agreed coordination.</li>
-              <li>Force majeure includes natural disasters, government restrictions, and unforeseen emergencies.</li>
-            </ul>
-
-            <div class="contract-actions-row">
-              <a class="contract-btn" href="#">Edit clauses</a>
-            </div>
-          </section>
-
-          <section class="contract-card" id="changes">
-            <h3>Change requests</h3>
-            <p class="meta">Track requested updates after the contract is shared.</p>
-
-            <ul class="bullets muted">
-              <li>No change requests yet.</li>
-              <li>Change requests become available after the contract is sent.</li>
-            </ul>
-          </section>
-
-        </div>
-      </main>
-
-    </div>
-  </div>
+  </section>
 </div>
 
 <?php require_once $root . '/includes/footer.php'; ?>

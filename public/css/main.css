@@ -3595,3 +3595,52 @@ body{
   .kv-row{ grid-template-columns: 1fr; }
   .kv-v{ text-align:left; }
 }
+
+/* ===== Required field validation UI (alert icon) ===== */
+.field-wrap{
+  position: relative;
+}
+
+.field-wrap .input-soft,
+.field-wrap .textarea-soft{
+  padding-right: 56px; /* space for alert icon */
+}
+
+.field-alert{
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: none;
+  place-items: center;
+  background: rgba(0,0,0,0.78);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+}
+
+.field-error{
+  display:none;
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0,0,0,0.55);
+}
+
+/* Invalid state */
+.field-wrap.is-invalid .field-alert{
+  display: grid;
+}
+
+.field-wrap.is-invalid .input-soft,
+.field-wrap.is-invalid .textarea-soft{
+  background: rgba(255, 59, 48, 0.06);
+  border: 1px solid rgba(255, 59, 48, 0.35);
+}
+
+.field-wrap.is-invalid + .field-error{
+  display:block;
+}
