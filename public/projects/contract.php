@@ -217,6 +217,93 @@ if ($minT === null) {
   $eventDatesLabel = ($minLabel === $maxLabel) ? $minLabel : ($minLabel . ' - ' . $maxLabel);
 }
 
+/* ---------- PARTIES & CONTACTS ---------- */
+if (!function_exists('first_non_empty')) {
+  function first_non_empty(array $values, string $fallback = '—'): string {
+    foreach ($values as $value) {
+      $value = trim((string)$value);
+      if ($value !== '') return $value;
+    }
+    return $fallback;
+  }
+}
+
+if (!function_exists('join_non_empty')) {
+  function join_non_empty(array $values, string $sep = ', ', string $fallback = '—'): string {
+    $parts = [];
+
+    foreach ($values as $value) {
+      $value = trim((string)$value);
+      if ($value !== '') $parts[] = $value;
+    }
+
+    $parts = array_values(array_unique($parts));
+    return $parts ? implode($sep, $parts) : $fallback;
+  }
+}
+
+$company = [];
+try {
+  $cstmt = $pdo->prepare("SELECT * FROM companies WHERE id = :cid LIMIT 1");
+  $cstmt->execute([':cid' => $companyId]);
+  $company = $cstmt->fetch() ?: [];
+} catch (Throwable $e) {
+  $company = [];
+}
+
+/* Service provider */
+$serviceProviderCompany = first_non_empty([
+  $company['name'] ?? '',
+  $vendorName ?? '',
+]);
+
+$serviceProviderAddress = join_non_empty([
+  $company['address'] ?? '',
+  $company['address_line1'] ?? '',
+  $company['address_line2'] ?? '',
+  $company['city'] ?? '',
+  $company['state'] ?? '',
+  $company['postal_code'] ?? '',
+]);
+
+$serviceProviderEmail = first_non_empty([
+  $company['email'] ?? '',
+  $company['contact_email'] ?? '',
+  $_SESSION['email'] ?? '',
+]);
+
+$serviceProviderPhone = first_non_empty([
+  $company['phone'] ?? '',
+  $company['contact_phone'] ?? '',
+  $_SESSION['phone'] ?? '',
+]);
+
+/* Client / host */
+$clientHostName = join_non_empty([
+  $partner1,
+  $partner2,
+], ' & ');
+
+$clientHostAddress = join_non_empty([
+  $project['address'] ?? '',
+  $project['address_line1'] ?? '',
+  $project['address_line2'] ?? '',
+  $project['city'] ?? '',
+  $project['state'] ?? '',
+  $project['postal_code'] ?? '',
+]);
+
+$clientHostEmail = join_non_empty([
+  $project['email1'] ?? '',
+  $project['email2'] ?? '',
+], ' / ');
+
+$clientHostPhone = join_non_empty([
+  $project['phone1'] ?? '',
+  $project['phone2'] ?? '',
+], ' / ');
+
+
 $pageTitle = (string)($project['title'] ?? 'Project') . ' — Contract & scope — Vidhaan';
 require_once $root . '/includes/header.php';
 ?>
@@ -473,13 +560,63 @@ require_once $root . '/includes/header.php';
             </div>
 
             <div class="card proj-card">
-              <div class="proj-card-title">Parties &amp; contacts</div>
-              <div class="proj-card-sub">Who is the agreement between</div>
-              <div style="margin-top:10px; color:var(--muted); font-size:13px;">(We’ll wire this up next.)</div>
-              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
-                <a class="btn" href="<?php echo esc(base_url('projects/contract_parties_contacts.php?id=' . $projectId)); ?>">Edit details</a>
-              </div>
-            </div>
+  <div class="proj-card-title">Parties &amp; contacts</div>
+  <div class="proj-card-sub">Who is the agreement between</div>
+
+  <div style="margin-top:12px;">
+    <div class="ed-section" style="margin-top:0;">Service provider</div>
+    <div class="info-table">
+      <div class="info-row">
+        <div class="info-k">Company</div>
+        <div class="info-v"><?php echo esc($serviceProviderCompany); ?></div>
+      </div>
+
+      <div class="info-row">
+        <div class="info-k">Address</div>
+        <div class="info-v"><?php echo esc($serviceProviderAddress); ?></div>
+      </div>
+
+      <div class="info-row">
+        <div class="info-k">Email</div>
+        <div class="info-v"><?php echo esc($serviceProviderEmail); ?></div>
+      </div>
+
+      <div class="info-row" style="border-bottom:none;">
+        <div class="info-k">Phone</div>
+        <div class="info-v"><?php echo esc($serviceProviderPhone); ?></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:14px;">
+    <div class="ed-section" style="margin-top:0;">Client (Host)</div>
+    <div class="info-table">
+      <div class="info-row">
+        <div class="info-k">Name</div>
+        <div class="info-v"><?php echo esc($clientHostName); ?></div>
+      </div>
+
+      <div class="info-row">
+        <div class="info-k">Address</div>
+        <div class="info-v"><?php echo esc($clientHostAddress); ?></div>
+      </div>
+
+      <div class="info-row">
+        <div class="info-k">Email</div>
+        <div class="info-v"><?php echo esc($clientHostEmail); ?></div>
+      </div>
+
+      <div class="info-row" style="border-bottom:none;">
+        <div class="info-k">Phone</div>
+        <div class="info-v"><?php echo esc($clientHostPhone); ?></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+    <a class="btn" href="<?php echo esc(base_url('projects/contract_parties_contacts.php?id=' . $projectId)); ?>">Edit details</a>
+  </div>
+</div>
 
             <div class="card proj-card">
               <div class="proj-card-title">Services provided</div>
