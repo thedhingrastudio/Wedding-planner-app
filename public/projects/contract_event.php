@@ -16,18 +16,6 @@ $eventId = (int)($_GET['eid'] ?? 0);
 $companyId = current_company_id();
 
 /* ---------- Helpers ---------- */
-if (!function_exists('contract_table_exists__evt')) {
-  function contract_table_exists__evt(PDO $pdo, string $table): bool {
-    try {
-      $st = $pdo->prepare("SHOW TABLES LIKE :t");
-      $st->execute([':t' => $table]);
-      return (bool)$st->fetchColumn();
-    } catch (Throwable $e) {
-      return false;
-    }
-  }
-}
-
 if (!function_exists('parse_date_ymd')) {
   function parse_date_ymd(string $ymd): ?string {
     $ymd = trim($ymd);
@@ -37,12 +25,11 @@ if (!function_exists('parse_date_ymd')) {
   }
 }
 
-function col_evt(array $row, string $key): string {
+function colv(array $row, string $key): string {
   return array_key_exists($key, $row) ? trim((string)$row[$key]) : '';
 }
 
-/** Map any legacy/label value → canonical DB value */
-function normalize_hosting_side_evt(string $raw): string {
+function normalize_hosting_side(string $raw): string {
   $v = strtolower(trim($raw));
   $v = str_replace(['’','`'], ["'","'"], $v);
 
@@ -50,7 +37,6 @@ function normalize_hosting_side_evt(string $raw): string {
   if (strpos($v, 'bride') !== false) return 'bride';
   if (strpos($v, 'groom') !== false) return 'groom';
   if (strpos($v, 'collab') !== false) return 'collaborative';
-
   return 'collaborative';
 }
 
@@ -69,7 +55,7 @@ if (!$project) redirect('projects/index.php');
 $adminName = trim((string)($_SESSION['full_name'] ?? ''));
 if ($adminName === '') $adminName = 'Admin';
 
-/* ---------- Needed for includes/project_sidebar.php ---------- */
+/* ---------- sidebar values (avoid warnings) ---------- */
 $projectDateLabel = 'Date TBD';
 $daysToGo = null;
 
@@ -83,7 +69,6 @@ try {
   ");
   $first->execute([':pid' => $projectId]);
   $row = $first->fetch();
-
   if ($row && !empty($row['starts_at'])) {
     $projectDateLabel = date('F j, Y', strtotime((string)$row['starts_at']));
     $d1 = new DateTimeImmutable(date('Y-m-d'));
@@ -93,18 +78,15 @@ try {
     $createdAt = (string)($project['created_at'] ?? '');
     if ($createdAt !== '') $projectDateLabel = date('F j, Y', strtotime($createdAt));
   }
-} catch (Throwable $e) {
-  $createdAt = (string)($project['created_at'] ?? '');
-  if ($createdAt !== '') $projectDateLabel = date('F j, Y', strtotime($createdAt));
-}
+} catch (Throwable $e) {}
 
 /* ---------- Prefill contacts from Project create form ---------- */
-$projPartner1 = col_evt($project, 'partner1_name');
-$projPartner2 = col_evt($project, 'partner2_name');
-$projPhone1   = col_evt($project, 'phone1');
-$projPhone2   = col_evt($project, 'phone2');
-$projEmail1   = col_evt($project, 'email1');
-$projEmail2   = col_evt($project, 'email2');
+$projPartner1 = colv($project, 'partner1_name');
+$projPartner2 = colv($project, 'partner2_name');
+$projPhone1   = colv($project, 'phone1');
+$projPhone2   = colv($project, 'phone2');
+$projEmail1   = colv($project, 'email1');
+$projEmail2   = colv($project, 'email2');
 
 /* ---------- Load event (edit mode) ---------- */
 $event = [
@@ -124,20 +106,25 @@ if ($eventId > 0) {
   ");
   $es->execute([':eid' => $eventId, ':pid' => $projectId]);
   $row = $es->fetch();
-  if ($row) {
-    $event['id'] = (int)$row['id'];
-    $event['name'] = (string)($row['name'] ?? '');
-    $event['starts_at'] = $row['starts_at'] ?? null;
-    $event['venue'] = (string)($row['venue'] ?? '');
-    $event['hosting_side'] = normalize_hosting_side_evt((string)($row['hosting_side'] ?? 'collaborative'));
-  } else {
-    redirect('projects/contract_event_details.php?id=' . $projectId);
-  }
+  if (!$row) redirect('projects/contract_event_details.php?id=' . $projectId);
+
+  $event['id'] = (int)$row['id'];
+  $event['name'] = (string)($row['name'] ?? '');
+  $event['starts_at'] = $row['starts_at'] ?? null;
+  $event['venue'] = (string)($row['venue'] ?? '');
+  $event['hosting_side'] = normalize_hosting_side((string)($row['hosting_side'] ?? 'collaborative'));
 }
 
-/* ---------- Optional meta table ---------- */
-$metaEnabled = contract_table_exists__evt($pdo, 'project_event_meta');
+/* ---------- PROBE meta table (real check) ---------- */
+$metaEnabled = false;
+try {
+  $pdo->query("SELECT 1 FROM project_event_meta LIMIT 1");
+  $metaEnabled = true;
+} catch (Throwable $e) {
+  $metaEnabled = false;
+}
 
+/* ---------- Load meta ---------- */
 $meta = [
   'description' => '',
   'client1_name' => '',
@@ -150,25 +137,36 @@ $meta = [
   'client2_address' => '',
 ];
 
+$hasMetaRow = false;
+
 if ($metaEnabled && $eventId > 0) {
   try {
-    $ms = $pdo->prepare("SELECT * FROM project_event_meta WHERE project_event_id = :eid LIMIT 1");
+    $ms = $pdo->prepare("
+      SELECT *
+      FROM project_event_meta
+      WHERE project_event_id = :eid
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    ");
     $ms->execute([':eid' => $eventId]);
     $mrow = $ms->fetch();
     if ($mrow) {
+      $hasMetaRow = true;
       foreach ($meta as $k => $_) $meta[$k] = (string)($mrow[$k] ?? '');
     }
   } catch (Throwable $e) {}
 }
 
-/* Prefill from project if meta is empty */
-if ($meta['client1_name'] === '' && $projPartner1 !== '') $meta['client1_name'] = $projPartner1;
-if ($meta['client1_phone'] === '' && $projPhone1 !== '')   $meta['client1_phone'] = $projPhone1;
-if ($meta['client1_email'] === '' && $projEmail1 !== '')   $meta['client1_email'] = $projEmail1;
+/* Prefill from project ONLY if no meta row exists yet */
+if (!$hasMetaRow) {
+  if ($meta['client1_name'] === '' && $projPartner1 !== '') $meta['client1_name'] = $projPartner1;
+  if ($meta['client1_phone'] === '' && $projPhone1 !== '')   $meta['client1_phone'] = $projPhone1;
+  if ($meta['client1_email'] === '' && $projEmail1 !== '')   $meta['client1_email'] = $projEmail1;
 
-if ($meta['client2_name'] === '' && $projPartner2 !== '') $meta['client2_name'] = $projPartner2;
-if ($meta['client2_phone'] === '' && $projPhone2 !== '')   $meta['client2_phone'] = $projPhone2;
-if ($meta['client2_email'] === '' && $projEmail2 !== '')   $meta['client2_email'] = $projEmail2;
+  if ($meta['client2_name'] === '' && $projPartner2 !== '') $meta['client2_name'] = $projPartner2;
+  if ($meta['client2_phone'] === '' && $projPhone2 !== '')   $meta['client2_phone'] = $projPhone2;
+  if ($meta['client2_email'] === '' && $projEmail2 !== '')   $meta['client2_email'] = $projEmail2;
+}
 
 /* ---------- POST: Save ---------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -177,12 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   $name = trim((string)($_POST['name'] ?? ''));
   $venue = trim((string)($_POST['venue'] ?? ''));
-  $hostingSide = normalize_hosting_side_evt((string)($_POST['hosting_side'] ?? 'collaborative'));
+  $hostingSide = normalize_hosting_side((string)($_POST['hosting_side'] ?? 'collaborative'));
 
   $dateYmd = trim((string)($_POST['date'] ?? ''));
   $startsAt = $dateYmd !== '' ? parse_date_ymd($dateYmd) : null;
 
-  // Server-side required rules
   if ($name === '') {
     flash_set('error', 'Event title is required.');
     redirect('projects/contract_event.php?id=' . $projectId . ($eventId ? '&eid=' . $eventId : ''));
@@ -240,31 +237,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $eventId = (int)$pdo->lastInsertId();
     }
 
+    // ✅ Always write meta if table is available
     if ($metaEnabled) {
-      $up = $pdo->prepare("
-        INSERT INTO project_event_meta
-          (project_event_id, description,
-           client1_name, client1_phone, client1_email, client1_address,
-           client2_name, client2_phone, client2_email, client2_address,
-           created_at, updated_at)
-        VALUES
-          (:eid, :description,
-           :c1n, :c1p, :c1e, :c1a,
-           :c2n, :c2p, :c2e, :c2a,
-           NOW(), NOW())
-        ON DUPLICATE KEY UPDATE
-          description = VALUES(description),
-          client1_name = VALUES(client1_name),
-          client1_phone = VALUES(client1_phone),
-          client1_email = VALUES(client1_email),
-          client1_address = VALUES(client1_address),
-          client2_name = VALUES(client2_name),
-          client2_phone = VALUES(client2_phone),
-          client2_email = VALUES(client2_email),
-          client2_address = VALUES(client2_address),
-          updated_at = NOW()
+      $um = $pdo->prepare("
+        UPDATE project_event_meta
+           SET description = :description,
+               client1_name = :c1n, client1_phone = :c1p, client1_email = :c1e, client1_address = :c1a,
+               client2_name = :c2n, client2_phone = :c2p, client2_email = :c2e, client2_address = :c2a,
+               updated_at = NOW()
+         WHERE project_event_id = :eid
       ");
-      $up->execute([
+      $um->execute([
         ':eid' => $eventId,
         ':description' => $metaPost['description'],
         ':c1n' => $metaPost['client1_name'],
@@ -276,9 +259,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ':c2e' => $metaPost['client2_email'],
         ':c2a' => $metaPost['client2_address'],
       ]);
+
+      if ($um->rowCount() === 0) {
+        $im = $pdo->prepare("
+          INSERT INTO project_event_meta
+            (project_event_id, description,
+             client1_name, client1_phone, client1_email, client1_address,
+             client2_name, client2_phone, client2_email, client2_address,
+             created_at, updated_at)
+          VALUES
+            (:eid, :description,
+             :c1n, :c1p, :c1e, :c1a,
+             :c2n, :c2p, :c2e, :c2a,
+             NOW(), NOW())
+        ");
+        $im->execute([
+          ':eid' => $eventId,
+          ':description' => $metaPost['description'],
+          ':c1n' => $metaPost['client1_name'],
+          ':c1p' => $metaPost['client1_phone'],
+          ':c1e' => $metaPost['client1_email'],
+          ':c1a' => $metaPost['client1_address'],
+          ':c2n' => $metaPost['client2_name'],
+          ':c2p' => $metaPost['client2_phone'],
+          ':c2e' => $metaPost['client2_email'],
+          ':c2a' => $metaPost['client2_address'],
+        ]);
+      }
     }
 
-    // bump project updated_at
     try {
       $pdo->prepare("UPDATE projects SET updated_at = NOW() WHERE id = :pid AND company_id = :cid")
           ->execute([':pid' => $projectId, ':cid' => $companyId]);
@@ -286,7 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $pdo->commit();
 
-    flash_set('success', 'Event saved.');
+    flash_set('success', $metaEnabled ? 'Event saved.' : 'Event saved. (Meta table not detected)');
     redirect('projects/contract_event.php?id=' . $projectId . '&eid=' . $eventId);
 
   } catch (Throwable $e) {
@@ -305,129 +314,36 @@ require_once $root . '/includes/header.php';
 ?>
 
 <style>
-/* Breadcrumb */
-.breadcrumb{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  font-weight:800;
-  font-size: 20px;
-  color: rgba(0,0,0,0.55);
-}
-.breadcrumb a{ text-decoration:none; color: rgba(0,0,0,0.55); }
-.breadcrumb .sep{ opacity:.55; }
-.subhead{ margin-top: 6px; color: var(--muted); font-size: 13px; }
-
-/* Actions */
-.top-actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.icon-btn{
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-}
-
-/* Layout */
-.form-grid{
-  display:grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 14px;
-  align-items:start;
-  margin-top: 14px;
-}
-@media (max-width: 1100px){ .form-grid{ grid-template-columns: 1fr; } }
-
-.card-headline{ color: rgba(0,0,0,0.45); font-weight: 900; font-size: 14px; }
-.card-sub{ color: var(--muted); font-size: 12px; margin-top: 4px; }
-.hr{ height: 1px; background: rgba(0,0,0,0.06); margin: 12px 0; }
-
-/* Soft inputs */
-label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.input-soft, .textarea-soft{
-  width: 100%;
-  padding: 12px 14px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: rgba(0,0,0,0.04);
-  font-size: 13px;
-  outline: none;
-}
-.textarea-soft{
-  border-radius: 18px;
-  min-height: 140px;
-  resize: vertical;
-  padding-top: 12px;
-}
-.input-soft:focus, .textarea-soft:focus{
-  background: #fff;
-  border-color: rgba(0,0,0,0.14);
-}
-.input-center{ text-align:center; font-weight: 650; }
-
-.field-row{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
-}
-@media (max-width: 900px){ .field-row{ grid-template-columns: 1fr; } }
-
-/* Hosted by chips */
-.chips{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
-.chip input{ display:none; }
-.chip label{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,0.12);
-  background: rgba(0,0,0,0.05);
-  cursor:pointer;
-  font-size: 13px;
-  transition: box-shadow 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease;
-}
-.chip input:checked + label{
-  background: #fff;
-  border: 2px solid rgba(0,0,0,0.40);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
-  font-weight: 800;
-  transform: translateY(-1px);
-}
-
-.stack{ display:flex; flex-direction:column; gap:14px; }
-
-/* Required field icon UI */
-.field-wrap{ position: relative; }
-.field-wrap .input-soft, .field-wrap .textarea-soft{ padding-right: 56px; }
-.field-alert{
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  display: none;
-  place-items: center;
-  background: rgba(0,0,0,0.78);
-  color: #fff;
-  font-size: 16px;
-}
-.field-error{
-  display:none;
-  margin-top: 6px;
-  font-size: 12px;
-  color: rgba(0,0,0,0.55);
-}
-.field-wrap.is-invalid .field-alert{ display:grid; }
-.field-wrap.is-invalid .input-soft, .field-wrap.is-invalid .textarea-soft{
-  background: rgba(255, 59, 48, 0.06);
-  border: 1px solid rgba(255, 59, 48, 0.35);
-}
-.field-wrap.is-invalid + .field-error{ display:block; }
+.breadcrumb{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:rgba(0,0,0,0.55);}
+.breadcrumb a{text-decoration:none;color:rgba(0,0,0,0.55);}
+.breadcrumb .sep{opacity:.55;}
+.subhead{margin-top:6px;color:var(--muted);font-size:13px;}
+.top-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.icon-btn{width:38px;height:38px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;}
+.form-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start;margin-top:14px;}
+@media (max-width:1100px){.form-grid{grid-template-columns:1fr;}}
+.card-headline{color:rgba(0,0,0,0.45);font-weight:900;font-size:14px;}
+.card-sub{color:var(--muted);font-size:12px;margin-top:4px;}
+.hr{height:1px;background:rgba(0,0,0,0.06);margin:12px 0;}
+label.small{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;}
+.input-soft,.textarea-soft{width:100%;padding:12px 14px;border-radius:999px;border:1px solid transparent;background:rgba(0,0,0,0.04);font-size:13px;outline:none;}
+.textarea-soft{border-radius:18px;min-height:140px;resize:vertical;padding-top:12px;}
+.input-soft:focus,.textarea-soft:focus{background:#fff;border-color:rgba(0,0,0,0.14);}
+.input-center{text-align:center;font-weight:650;}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+@media (max-width:900px){.field-row{grid-template-columns:1fr;}}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+.chip input{display:none;}
+.chip label{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:999px;border:1px solid rgba(0,0,0,0.12);background:rgba(0,0,0,0.05);cursor:pointer;font-size:13px;transition:box-shadow 140ms ease,border-color 140ms ease,background 140ms ease,transform 140ms ease;}
+.chip input:checked + label{background:#fff;border:2px solid rgba(0,0,0,0.40);box-shadow:0 6px 18px rgba(0,0,0,0.08);font-weight:800;transform:translateY(-1px);}
+.stack{display:flex;flex-direction:column;gap:14px;}
+.field-wrap{position:relative;}
+.field-wrap .input-soft,.field-wrap .textarea-soft{padding-right:56px;}
+.field-alert{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:999px;display:none;place-items:center;background:rgba(0,0,0,0.78);color:#fff;font-size:16px;}
+.field-error{display:none;margin-top:6px;font-size:12px;color:rgba(0,0,0,0.55);}
+.field-wrap.is-invalid .field-alert{display:grid;}
+.field-wrap.is-invalid .input-soft,.field-wrap.is-invalid .textarea-soft{background:rgba(255,59,48,0.06);border:1px solid rgba(255,59,48,0.35);}
+.field-wrap.is-invalid + .field-error{display:block;}
 </style>
 
 <div class="app-shell">
@@ -492,7 +408,6 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
 
             <div class="form-grid">
 
-              <!-- Left card -->
               <div class="card proj-card">
                 <div class="card-headline">Event information</div>
                 <div class="card-sub">Track signing progress and key parties.</div>
@@ -520,14 +435,14 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
                   </div>
                 </div>
 
-                <div style="margin-top: 12px;">
+                <div style="margin-top:12px;">
                   <label class="small">Event description (optional)</label>
                   <div class="field-wrap">
                     <textarea class="textarea-soft" name="description" placeholder="Event description ..."><?php echo h($meta['description']); ?></textarea>
                   </div>
                 </div>
 
-                <div style="margin-top: 12px;">
+                <div style="margin-top:12px;">
                   <label class="small">Venue (optional)</label>
                   <div class="field-wrap">
                     <input class="input-soft" type="text" name="venue"
@@ -535,9 +450,9 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
                   </div>
                 </div>
 
-                <div style="margin-top: 14px;">
+                <div style="margin-top:14px;">
                   <label class="small">Hosted by</label>
-                  <?php $sideKey = normalize_hosting_side_evt((string)$event['hosting_side']); ?>
+                  <?php $sideKey = normalize_hosting_side((string)$event['hosting_side']); ?>
                   <div class="chips">
                     <div class="chip">
                       <input id="side_bride" type="radio" name="hosting_side" value="bride" <?php echo ($sideKey === 'bride' ? 'checked' : ''); ?>>
@@ -555,7 +470,6 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
                 </div>
               </div>
 
-              <!-- Right stack -->
               <div class="stack">
                 <div class="card proj-card">
                   <div class="card-headline">Client contact 1</div>
@@ -627,7 +541,6 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
     if (!el) return '';
     return (el.value || '').trim();
   }
-
   function setInvalid(wrap, message) {
     wrap.classList.add('is-invalid');
     const err = wrap.parentElement?.querySelector('.field-error');
@@ -635,7 +548,6 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
     const input = wrap.querySelector('input, textarea, select');
     if (input) input.setAttribute('aria-invalid', 'true');
   }
-
   function clearInvalid(wrap) {
     wrap.classList.remove('is-invalid');
     const input = wrap.querySelector('input, textarea, select');
@@ -645,7 +557,7 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
   requiredWraps.forEach((wrap) => {
     const input = wrap.querySelector('input, textarea, select');
     if (!input) return;
-    const evt = (input.tagName === 'SELECT' || input.type === 'date') ? 'change' : 'input';
+    const evt = (input.type === 'date') ? 'change' : 'input';
     input.addEventListener(evt, () => {
       if (getFieldValue(wrap) !== '') clearInvalid(wrap);
     });
@@ -653,7 +565,6 @@ label.small{ display:block; font-size: 12px; color: var(--muted); margin-bottom:
 
   form.addEventListener('submit', (e) => {
     let firstBad = null;
-
     requiredWraps.forEach((wrap) => {
       const val = getFieldValue(wrap);
       if (val === '') {
