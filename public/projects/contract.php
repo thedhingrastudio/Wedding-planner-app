@@ -14,7 +14,7 @@ if ($projectId <= 0) redirect('projects/index.php');
 
 $companyId = current_company_id();
 
-/* ---------- helpers (DON'T use h0 here; it exists in project_sidebar.php) ---------- */
+/* ---------- helpers ---------- */
 function esc($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 function fmt_dt(?string $ts, string $format): string {
@@ -25,10 +25,6 @@ function fmt_dt(?string $ts, string $format): string {
   return date($format, $t);
 }
 
-/**
- * Safely run scalar queries even if table/column doesn't exist.
- * Returns null if query fails.
- */
 function safe_fetch_scalar(PDO $pdo, string $sql, array $params): ?string {
   try {
     $st = $pdo->prepare($sql);
@@ -87,15 +83,20 @@ if ($firstEvent && !empty($firstEvent['starts_at'])) {
   if ($createdAt !== '') $topDateLabel = date('F j, Y', strtotime($createdAt));
 }
 
-/* ---------- Team count (optional, for sidebar copy) ---------- */
+/* keep project sidebar happy */
+$projectDateLabel = $topDateLabel;
+
+/* ---------- Team count ---------- */
 $teamCount = 0;
 try {
   $tc = $pdo->prepare("SELECT COUNT(*) FROM project_members WHERE project_id = :pid");
   $tc->execute([':pid' => $projectId]);
   $teamCount = (int)($tc->fetchColumn() ?: 0);
-} catch (Throwable $e) { $teamCount = 0; }
+} catch (Throwable $e) {
+  $teamCount = 0;
+}
 
-/* ---------- Contract row (optional) ---------- */
+/* ---------- Contract row ---------- */
 $contract = null;
 try {
   $cs = $pdo->prepare("SELECT status, version_label, updated_at FROM contracts WHERE project_id = :pid ORDER BY id DESC LIMIT 1");
@@ -106,7 +107,7 @@ try {
 }
 
 $contractStatusRaw = strtolower(trim((string)($contract['status'] ?? 'draft')));
-$contractStatusLabel = $contractStatusRaw !== '' ? ucfirst(str_replace('_',' ', $contractStatusRaw)) : 'Draft';
+$contractStatusLabel = $contractStatusRaw !== '' ? ucfirst(str_replace('_', ' ', $contractStatusRaw)) : 'Draft';
 $versionLabel = trim((string)($contract['version_label'] ?? 'v0.1'));
 $versionBadge = $contractStatusLabel . ' • ' . ($versionLabel !== '' ? $versionLabel : 'v0.1');
 
@@ -116,7 +117,7 @@ $partner2 = trim((string)($project['partner2_name'] ?? ''));
 
 $clientName = trim(($partner1 !== '' ? $partner1 : 'Partner 1') . ($partner2 !== '' ? ' and ' . $partner2 : ''));
 
-// Vendor = company name (best effort)
+/* Vendor = company name (best effort) */
 $vendorName = 'Your company';
 try {
   $vn = $pdo->prepare("SELECT name FROM companies WHERE id = :cid LIMIT 1");
@@ -125,11 +126,11 @@ try {
   if ($tmp !== '') $vendorName = $tmp;
 } catch (Throwable $e) {}
 
-// Prepared by
+/* Prepared by */
 $preparedBy = trim((string)($_SESSION['full_name'] ?? ''));
 if ($preparedBy === '') $preparedBy = 'You';
 
-// Target sign-off = event date closest to today (fallback = first event)
+/* Target sign-off */
 $signOffTs = null;
 try {
   $closest = $pdo->prepare("
@@ -149,7 +150,7 @@ if ($signOffTs === null && $firstEvent && !empty($firstEvent['starts_at'])) {
 }
 $signOffLabel = fmt_dt($signOffTs, 'd/m/Y');
 
-// Last updated on (best effort across project + contract + events + tasks + members)
+/* Last updated on */
 $tsCandidates = [];
 $tsCandidates[] = (string)($project['updated_at'] ?? '');
 $tsCandidates[] = (string)($project['created_at'] ?? '');
@@ -188,7 +189,8 @@ try {
 }
 
 $eventNames = [];
-$minT = null; $maxT = null;
+$minT = null;
+$maxT = null;
 
 foreach ($events as $e) {
   $n = trim((string)($e['name'] ?? ''));
@@ -225,7 +227,7 @@ require_once $root . '/includes/header.php';
   align-items:flex-start;
   justify-content:space-between;
   gap:14px;
-  margin-bottom: 14px;
+  margin-bottom:14px;
 }
 .contract-head .left h2{
   margin:0;
@@ -234,8 +236,8 @@ require_once $root . '/includes/header.php';
 }
 .contract-head .left p{
   margin:6px 0 0 0;
-  color: var(--muted);
-  font-size: 13px;
+  color:var(--muted);
+  font-size:13px;
 }
 .contract-badge{
   display:inline-flex;
@@ -245,10 +247,10 @@ require_once $root . '/includes/header.php';
   font-size:12px;
   padding:6px 10px;
   border:1px solid var(--border);
-  border-radius: 999px;
+  border-radius:999px;
   background:#fff;
   color:#222;
-  vertical-align: middle;
+  vertical-align:middle;
 }
 .contract-actions{
   display:flex;
@@ -266,69 +268,67 @@ require_once $root . '/includes/header.php';
 }
 .contract-grid{
   display:grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
-  gap: 14px;
+  grid-template-columns:1.2fr 1fr 1fr;
+  gap:14px;
   align-items:start;
 }
-@media (max-width: 1100px){
-  .contract-grid{ grid-template-columns: 1fr; }
+@media (max-width:1100px){
+  .contract-grid{ grid-template-columns:1fr; }
 }
 .kv{
-  margin-top: 10px;
-  border-top: 1px solid rgba(0,0,0,0.06);
+  margin-top:10px;
+  border-top:1px solid rgba(0,0,0,0.06);
 }
 .kv-row{
   display:grid;
-  grid-template-columns: 140px 1fr;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  font-size: 13px;
+  grid-template-columns:140px 1fr;
+  gap:12px;
+  padding:12px 0;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+  font-size:13px;
 }
-.kv-k{ color: var(--muted); }
+.kv-k{ color:var(--muted); }
 .kv-v{ text-align:right; font-weight:600; color:#222; }
 .kv-actions{
   display:flex;
   justify-content:flex-end;
-  margin-top: 12px;
+  margin-top:12px;
 }
-.card-minh{ min-height: 130px; }
+.card-minh{ min-height:130px; }
 .card-list a{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  color: inherit;
+  padding:10px 0;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+  color:inherit;
   text-decoration:none;
-  font-size: 13px;
+  font-size:13px;
 }
 .card-list a:last-child{ border-bottom:none; }
-.card-list .chev{ color: var(--muted); }
-
-/* Event details table */
+.card-list .chev{ color:var(--muted); }
 .ed-section{
-  margin-top: 12px;
-  font-weight: 800;
-  font-size: 13px;
-  color: #222;
+  margin-top:12px;
+  font-weight:800;
+  font-size:13px;
+  color:#222;
 }
 .info-table{
-  margin-top: 8px;
-  border-top: 1px solid rgba(0,0,0,0.06);
+  margin-top:8px;
+  border-top:1px solid rgba(0,0,0,0.06);
 }
 .info-row{
   display:grid;
-  grid-template-columns: 140px 1fr;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  font-size: 13px;
+  grid-template-columns:140px 1fr;
+  gap:12px;
+  padding:10px 0;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+  font-size:13px;
 }
-.info-k{ color: var(--muted); }
+.info-k{ color:var(--muted); }
 .info-v{ color:#222; font-weight:600; }
-@media (max-width: 700px){
-  .info-row{ grid-template-columns: 1fr; }
+@media (max-width:700px){
+  .info-row{ grid-template-columns:1fr; }
 }
 </style>
 
@@ -395,7 +395,6 @@ require_once $root . '/includes/header.php';
 
           <div class="contract-grid">
 
-            <!-- Contract status -->
             <div class="card proj-card">
               <div class="proj-card-title">Contract status</div>
               <div class="proj-card-sub">Track signing progress and key parties.</div>
@@ -428,7 +427,6 @@ require_once $root . '/includes/header.php';
               </div>
             </div>
 
-            <!-- Event details (reference style) -->
             <div class="card proj-card">
               <div class="proj-card-title">Event details</div>
               <div class="proj-card-sub">Core event information for planning.</div>
@@ -462,38 +460,36 @@ require_once $root . '/includes/header.php';
               </div>
 
               <div class="kv-actions">
-                <a class="btn" href="<?php echo h(base_url('projects/contract_event_details.php?id=' . $projectId)); ?>">Edit details</a>
+                <a class="btn" href="<?php echo esc(base_url('projects/contract_event_details.php?id=' . $projectId)); ?>">Edit details</a>
               </div>
             </div>
 
-            <!-- Payment terms -->
             <div class="card proj-card card-minh">
               <div class="proj-card-title">Payment terms</div>
               <div class="proj-card-sub">Total fee, milestones, and cancellation terms.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Edit payment schedule</button>
               </div>
             </div>
 
-            <!-- The rest of your cards can stay as-is (next we’ll wire them one by one) -->
             <div class="card proj-card">
               <div class="proj-card-title">Parties &amp; contacts</div>
               <div class="proj-card-sub">Who is the agreement between</div>
-              <div style="margin-top: 10px; color: var(--muted); font-size:13px;">(We’ll wire this up next.)</div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
-                <button class="btn" type="button">Edit details</button>
+              <div style="margin-top:10px; color:var(--muted); font-size:13px;">(We’ll wire this up next.)</div>
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                <a class="btn" href="<?php echo esc(base_url('projects/contract_parties_contacts.php?id=' . $projectId)); ?>">Edit details</a>
               </div>
             </div>
 
             <div class="card proj-card">
               <div class="proj-card-title">Services provided</div>
               <div class="proj-card-sub">What the planning team will deliver for this event.</div>
-              <div class="card-list" style="margin-top: 10px;">
+              <div class="card-list" style="margin-top:10px;">
                 <a href="#" onclick="return false;"><span>Consultation &amp; planning</span><span class="chev">›</span></a>
                 <a href="#" onclick="return false;"><span>Vendor coordination</span><span class="chev">›</span></a>
                 <a href="#" onclick="return false;"><span>Logistics &amp; on-ground coordination</span><span class="chev">›</span></a>
               </div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">View &amp; edit services</button>
               </div>
             </div>
@@ -501,12 +497,12 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card">
               <div class="proj-card-title">Cancellation policy</div>
               <div class="proj-card-sub">Refund and cancellation terms</div>
-              <ul style="margin: 10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
+              <ul style="margin:10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
                 <li>Cancellation <strong>30–90 days</strong> before the event: <strong>50%</strong> refundable (excluding deposit)</li>
                 <li>Cancellation <strong>less than 30 days</strong> before the wedding: No refund</li>
                 <li>Date changes: treated as rescheduling—charges may apply</li>
               </ul>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Edit policy</button>
               </div>
             </div>
@@ -514,7 +510,7 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card">
               <div class="proj-card-title">Client responsibilities</div>
               <div class="proj-card-sub">Confirm dates, venue, and requirements on time.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Edit details</button>
               </div>
             </div>
@@ -522,7 +518,7 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card card-minh">
               <div class="proj-card-title">Staffing plan</div>
               <div class="proj-card-sub">Set the team size needed for execution.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Edit details</button>
               </div>
             </div>
@@ -530,7 +526,7 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card card-minh">
               <div class="proj-card-title">Notes &amp; files</div>
               <div class="proj-card-sub">Attach documents and keep internal notes.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Upload files</button>
               </div>
             </div>
@@ -538,11 +534,11 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card">
               <div class="proj-card-title">Liability &amp; force majeure</div>
               <div class="proj-card-sub">Responsibility limits and uncontrollable events.</div>
-              <ul style="margin: 10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
+              <ul style="margin:10px 0 0 18px; color:#222; font-size:13px; line-height:1.45;">
                 <li>The service provider is not liable for issues caused by third-party vendors beyond agreed coordination.</li>
                 <li>Force majeure includes natural disasters, government restrictions, and unforeseen emergencies.</li>
               </ul>
-              <div style="display:flex; justify-content:flex-end; margin-top: 14px;">
+              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
                 <button class="btn" type="button">Edit clauses</button>
               </div>
             </div>
@@ -550,7 +546,7 @@ require_once $root . '/includes/header.php';
             <div class="card proj-card">
               <div class="proj-card-title">Change requests</div>
               <div class="proj-card-sub">Track requested updates after the contract is shared.</div>
-              <div style="margin-top: 10px; color: var(--muted); font-size:13px;">
+              <div style="margin-top:10px; color:var(--muted); font-size:13px;">
                 <ul style="margin:0 0 0 18px;">
                   <li>No change requests yet.</li>
                   <li>Change requests become available after the contract is sent.</li>
