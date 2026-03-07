@@ -5,6 +5,7 @@ $root = __DIR__;
 while ($root !== dirname($root) && !is_dir($root . '/includes')) $root = dirname($root);
 
 require_once $root . '/includes/app_start.php';
+require_once $root . '/includes/audit.php';
 require_login();
 
 $pdo = $pdo ?? get_pdo();
@@ -168,9 +169,27 @@ if (!$hasMetaRow) {
   if ($meta['client2_email'] === '' && $projEmail2 !== '')   $meta['client2_email'] = $projEmail2;
 }
 
+
+$beforeAudit = [
+  'name' => (string)($event['name'] ?? ''),
+  'starts_at' => !empty($event['starts_at']) ? substr((string)$event['starts_at'], 0, 10) : '',
+  'venue' => (string)($event['venue'] ?? ''),
+  'hosting_side' => normalize_hosting_side((string)($event['hosting_side'] ?? '')),
+  'description' => (string)($meta['description'] ?? ''),
+  'client1_name' => (string)($meta['client1_name'] ?? ''),
+  'client1_phone' => (string)($meta['client1_phone'] ?? ''),
+  'client1_email' => (string)($meta['client1_email'] ?? ''),
+  'client2_name' => (string)($meta['client2_name'] ?? ''),
+  'client2_phone' => (string)($meta['client2_phone'] ?? ''),
+  'client2_email' => (string)($meta['client2_email'] ?? ''),
+];
+
+
+
 /* ---------- POST: Save ---------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = (string)($_POST['action'] ?? 'save');
+    $wasEdit = $eventId > 0;
   if ($action === 'discard') redirect('projects/contract_event_details.php?id=' . $projectId);
 
   $name = trim((string)($_POST['name'] ?? ''));
@@ -237,7 +256,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $eventId = (int)$pdo->lastInsertId();
     }
 
-    // ✅ Always write meta if table is available
     if ($metaEnabled) {
       $um = $pdo->prepare("
         UPDATE project_event_meta
@@ -295,8 +313,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $pdo->commit();
 
+        $afterAudit = [
+      'name' => $name,
+      'starts_at' => $dateYmd,
+      'venue' => $venue,
+      'hosting_side' => $hostingSide,
+      'description' => $metaPost['description'],
+      'client1_name' => $metaPost['client1_name'],
+      'client1_phone' => $metaPost['client1_phone'],
+      'client1_email' => $metaPost['client1_email'],
+      'client2_name' => $metaPost['client2_name'],
+      'client2_phone' => $metaPost['client2_phone'],
+      'client2_email' => $metaPost['client2_email'],
+    ];
+
+    audit_log([
+      'pdo' => $pdo,
+      'company_id' => $companyId,
+      'project_id' => $projectId,
+      'actor_user_id' => audit_actor_user_id(),
+      'actor_name' => audit_actor_name(),
+      'entity_type' => 'project_event',
+      'entity_id' => $eventId,
+      'action' => $wasEdit ? 'updated' : 'created',
+      'summary' => ($wasEdit ? 'Updated event: ' : 'Created event: ') . $name,
+      'diff_json' => [
+        'before' => $beforeAudit,
+        'after' => $afterAudit,
+      ],
+      'search_text' => audit_build_search_text([
+        'event',
+        $wasEdit ? 'updated' : 'created',
+        $name,
+        $venue,
+        $hostingSide,
+        $metaPost['description'],
+        $metaPost['client1_name'],
+        $metaPost['client2_name'],
+      ]),
+    ]);
+
     flash_set('success', $metaEnabled ? 'Event saved.' : 'Event saved. (Meta table not detected)');
-    redirect('projects/contract_event.php?id=' . $projectId . '&eid=' . $eventId);
+    redirect('projects/contract_event_details.php?id=' . $projectId);
 
   } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -453,19 +511,36 @@ label.small{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;}
                 <div style="margin-top:14px;">
                   <label class="small">Hosted by</label>
                   <?php $sideKey = normalize_hosting_side((string)$event['hosting_side']); ?>
-                  <div class="chips">
-                    <div class="chip">
-                      <input id="side_bride" type="radio" name="hosting_side" value="bride" <?php echo ($sideKey === 'bride' ? 'checked' : ''); ?>>
-                      <label for="side_bride"><?php echo h($SIDE_LABEL['bride']); ?></label>
-                    </div>
-                    <div class="chip">
-                      <input id="side_groom" type="radio" name="hosting_side" value="groom" <?php echo ($sideKey === 'groom' ? 'checked' : ''); ?>>
-                      <label for="side_groom"><?php echo h($SIDE_LABEL['groom']); ?></label>
-                    </div>
-                    <div class="chip">
-                      <input id="side_collab" type="radio" name="hosting_side" value="collaborative" <?php echo ($sideKey === 'collaborative' ? 'checked' : ''); ?>>
-                      <label for="side_collab"><?php echo h($SIDE_LABEL['collaborative']); ?></label>
-                    </div>
+                  <div class="hosted-by-group" role="radiogroup" aria-label="Hosted by">
+                    <input
+                      id="hosting_side_bride"
+                      class="hosted-by-input"
+                      type="radio"
+                      name="hosting_side"
+                      value="bride"
+                      <?php echo ($sideKey === 'bride' ? 'checked' : ''); ?>
+                    >
+                    <label for="hosting_side_bride" class="hosted-by-pill"><?php echo h($SIDE_LABEL['bride']); ?></label>
+
+                    <input
+                      id="hosting_side_groom"
+                      class="hosted-by-input"
+                      type="radio"
+                      name="hosting_side"
+                      value="groom"
+                      <?php echo ($sideKey === 'groom' ? 'checked' : ''); ?>
+                    >
+                    <label for="hosting_side_groom" class="hosted-by-pill"><?php echo h($SIDE_LABEL['groom']); ?></label>
+
+                    <input
+                      id="hosting_side_collaborative"
+                      class="hosted-by-input"
+                      type="radio"
+                      name="hosting_side"
+                      value="collaborative"
+                      <?php echo ($sideKey === 'collaborative' ? 'checked' : ''); ?>
+                    >
+                    <label for="hosting_side_collaborative" class="hosted-by-pill"><?php echo h($SIDE_LABEL['collaborative']); ?></label>
                   </div>
                 </div>
               </div>

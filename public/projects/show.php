@@ -19,10 +19,7 @@ $pstmt->execute([':id' => $projectId, ':cid' => $companyId]);
 $project = $pstmt->fetch();
 if (!$project) redirect('projects/index.php');
 
-$pageTitle = $project['title'] . ' — Vidhaan';
-require_once $root . '/includes/header.php';
-
-// first event for countdown
+/* ---------- first event for countdown ---------- */
 $first = null;
 try {
   $evt = $pdo->prepare("SELECT starts_at FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC LIMIT 1");
@@ -59,6 +56,7 @@ function task_cat_label(string $cat): string {
   $cat = strtolower(trim($cat));
   return $map[$cat] ?? ucfirst(str_replace('_', ' ', $cat));
 }
+
 function task_cat_icon(string $cat): string {
   $map = [
     'follow_ups' => '✉️',
@@ -74,7 +72,7 @@ function task_cat_icon(string $cat): string {
   return $map[$cat] ?? '☑️';
 }
 
-// team count for sidebar
+/* ---------- team count for sidebar ---------- */
 $teamCount = 0;
 try {
   $tc = $pdo->prepare("
@@ -95,7 +93,7 @@ try {
   $teamCount = 0;
 }
 
-// tasks for Alerts card (latest 5 assigned tasks)
+/* ---------- tasks for Alerts card ---------- */
 $tasksTableExists = false;
 $alertTasks = [];
 $alertTasksError = '';
@@ -109,7 +107,6 @@ try {
 
 if ($tasksTableExists) {
   try {
-    // Strict: company + project
     $ts = $pdo->prepare("
       SELECT
         t.id,
@@ -140,7 +137,6 @@ if ($tasksTableExists) {
     ]);
     $alertTasks = $ts->fetchAll() ?: [];
 
-    // Fallback: project only (if some old tasks have wrong/missing company_id)
     if (!$alertTasks) {
       $ts2 = $pdo->prepare("
         SELECT
@@ -176,7 +172,49 @@ if ($tasksTableExists) {
     $alertTasksError = $e->getMessage();
   }
 }
+
+/* ---------- recent activity for Recent updates card ---------- */
+$auditTableExists = false;
+$recentUpdates = [];
+
+try {
+  $q = $pdo->query("SHOW TABLES LIKE 'audit_logs'");
+  $auditTableExists = (bool)$q->fetchColumn();
+} catch (Throwable $e) {
+  $auditTableExists = false;
+}
+
+if ($auditTableExists) {
+  try {
+    $au = $pdo->prepare("
+      SELECT id, actor_name, summary, ip_address, created_at
+      FROM audit_logs
+      WHERE company_id = :cid
+        AND project_id = :pid
+      ORDER BY created_at DESC, id DESC
+      LIMIT 6
+    ");
+    $au->execute([
+      ':cid' => $companyId,
+      ':pid' => $projectId,
+    ]);
+    $recentUpdates = $au->fetchAll() ?: [];
+  } catch (Throwable $e) {
+    $recentUpdates = [];
+  }
+}
+
+$pageTitle = $project['title'] . ' — Vidhaan';
+require_once $root . '/includes/header.php';
 ?>
+
+<style>
+.activity-list{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+.activity-item{padding:12px 14px;border-radius:16px;border:1px solid rgba(0,0,0,0.06);background:rgba(0,0,0,0.02);}
+.activity-title{font-size:14px;font-weight:700;color:#111;line-height:1.4;}
+.activity-meta{margin-top:4px;font-size:12px;color:var(--muted);line-height:1.45;}
+.activity-empty{padding:28px 16px;text-align:center;color:var(--muted);}
+</style>
 
 <div class="app-shell">
   <?php
@@ -323,70 +361,93 @@ if ($tasksTableExists) {
 
               <?php else: ?>
                 <div class="alerts-scroll">
-                <div class="alerts-list">
-                  <?php foreach ($alertTasks as $t): ?>
-                    <?php
-                      $taskId   = (int)($t['id'] ?? 0);
-                      $cat      = (string)($t['category'] ?? 'general');
-                      $icon     = task_cat_icon($cat);
+                  <div class="alerts-list">
+                    <?php foreach ($alertTasks as $t): ?>
+                      <?php
+                        $taskId   = (int)($t['id'] ?? 0);
+                        $cat      = (string)($t['category'] ?? 'general');
+                        $icon     = task_cat_icon($cat);
 
-                      $title    = trim((string)($t['title'] ?? 'Untitled task'));
-                      $assignee = (string)($t['assignee_name'] ?? 'Unassigned');
+                        $title    = trim((string)($t['title'] ?? 'Untitled task'));
+                        $assignee = (string)($t['assignee_name'] ?? 'Unassigned');
 
-                      $due = (string)($t['due_on'] ?? '');
-                      $dueLabel = $due ? date('d M', strtotime($due)) : 'No due date';
+                        $due = (string)($t['due_on'] ?? '');
+                        $dueLabel = $due ? date('d M', strtotime($due)) : 'No due date';
 
-                      $isOverdue = false;
-                      if ($due) {
-                        $isOverdue = strtotime(substr($due, 0, 10)) < strtotime(date('Y-m-d'));
-                      }
+                        $isOverdue = false;
+                        if ($due) {
+                          $isOverdue = strtotime(substr($due, 0, 10)) < strtotime(date('Y-m-d'));
+                        }
 
-                      $priority = strtolower((string)($t['priority'] ?? ''));
-                      $priorityLabel = $priority ? ucfirst($priority) : '';
-                    ?>
+                        $priority = strtolower((string)($t['priority'] ?? ''));
+                        $priorityLabel = $priority ? ucfirst($priority) : '';
+                      ?>
 
-                    <div class="alert-item <?php echo $isOverdue ? 'alert-item--overdue' : ''; ?>"
-                         role="link"
-                         tabindex="0"
-                         data-task-row
-                         data-href="<?php echo h0(base_url('tasks/show.php?id=' . $taskId)); ?>">
-                      <div class="alert-ico"><?php echo h0($icon); ?></div>
+                      <div class="alert-item <?php echo $isOverdue ? 'alert-item--overdue' : ''; ?>"
+                           role="link"
+                           tabindex="0"
+                           data-task-row
+                           data-href="<?php echo h0(base_url('tasks/show.php?id=' . $taskId)); ?>">
+                        <div class="alert-ico"><?php echo h0($icon); ?></div>
 
-                      <div class="alert-body">
-                        <div class="alert-title"><?php echo h0($title); ?></div>
-                        <div class="alert-meta">
-                          <span><?php echo h0($assignee); ?></span>
-                          <span>•</span>
-                          <span><?php echo h0($dueLabel); ?></span>
-                          <?php if ($priorityLabel): ?>
-                            <span class="alert-pill"><?php echo h0($priorityLabel); ?></span>
-                          <?php endif; ?>
-                        </div>
-                      </div>
-
-                      <div class="task-overview-arrow">›</div>
-                    </div>
-                  <?php endforeach; ?>
-                </div>
+                        <div class="alert-body">
+                          <div class="alert-title"><?php echo h0($title); ?></div>
+                          <div class="alert-meta">
+                            <span><?php echo h0($assignee); ?></span>
+                            <span>•</span>
+                            <span><?php echo h0($dueLabel); ?></span>
+                            <?php if ($priorityLabel): ?>
+                              <span class="alert-pill"><?php echo h0($priorityLabel); ?></span>
+                            <?php endif; ?>
                           </div>
-                        
+                        </div>
+
+                        <div class="task-overview-arrow">›</div>
+                      </div>
+                    <?php endforeach; ?>
+                  </div>
+                </div>
 
                 <div class="alerts-actions">
-  <a class="btn btn-primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-  <a class="btn" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">Show all</a>
-</div>
+                  <a class="btn btn-primary" href="<?php echo h0(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
+                  <a class="btn" href="<?php echo h0(base_url('projects/open_tasks.php?id=' . $projectId . '&view=open')); ?>">Show all</a>
+                </div>
               <?php endif; ?>
             </div>
 
-            <!-- Recent updates placeholder -->
+            <!-- Recent updates -->
             <div class="card proj-card proj-card--tall">
-              <div class="proj-card-title">Recent updates</div>
-              <div class="proj-card-sub">Latest changes across your team and guests.</div>
+              <div class="card-headline">Recent updates</div>
+              <div class="card-sub">Latest changes across your team and guests.</div>
 
-              <div class="proj-empty">
-                <div class="proj-empty-ico">📄</div>
-                <div class="proj-empty-title">No recent updates</div>
-                <div class="proj-empty-sub">All updates on the project will be displayed here</div>
+              <?php if (!$auditTableExists): ?>
+                <div class="activity-empty">
+                  Audit logging is not set up yet.
+                </div>
+              <?php elseif (empty($recentUpdates)): ?>
+                <div class="activity-empty">
+                  No recent updates
+                  <div style="margin-top:10px;">All updates on the project will be displayed here</div>
+                </div>
+              <?php else: ?>
+                <div class="activity-list">
+                  <?php foreach ($recentUpdates as $log): ?>
+                    <div class="activity-item">
+                      <div class="activity-title"><?php echo h0((string)$log['summary']); ?></div>
+                      <div class="activity-meta">
+                        <?php echo h0((string)$log['actor_name']); ?>
+                        · <?php echo h0(date('d M, g:i a', strtotime((string)$log['created_at']))); ?>
+                        <?php if (!empty($log['ip_address'])): ?>
+                          · IP <?php echo h0((string)$log['ip_address']); ?>
+                        <?php endif; ?>
+                      </div>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+              <?php endif; ?>
+
+              <div style="margin-top:14px;">
+                <a class="btn" href="<?php echo h0(base_url('projects/activity.php?id=' . $projectId)); ?>">Show all</a>
               </div>
             </div>
 

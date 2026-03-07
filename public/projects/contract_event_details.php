@@ -15,44 +15,77 @@ if ($projectId <= 0) redirect('projects/index.php');
 $companyId = current_company_id();
 
 /* ---------- Helpers ---------- */
-function has_col(PDO $pdo, string $table, string $col): bool {
-  try {
-    $st = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE :c");
-    $st->execute([':c' => $col]);
-    return (bool)$st->fetch();
-  } catch (Throwable $e) {
-    return false;
+if (!function_exists('normalize_hosting_side')) {
+  function normalize_hosting_side(string $raw): string {
+    $v = strtolower(trim($raw));
+    $v = str_replace(['’', '`'], ["'", "'"], $v);
+
+    if ($v === '') return '';
+    if (in_array($v, ['bride', 'groom', 'collaborative'], true)) return $v;
+    if (strpos($v, 'bride') !== false) return 'bride';
+    if (strpos($v, 'groom') !== false) return 'groom';
+    if (strpos($v, 'collab') !== false) return 'collaborative';
+
+    return '';
   }
 }
 
+$SIDE_LABEL = [
+  'bride' => "Bride’s side",
+  'groom' => "Groom’s side",
+  'collaborative' => "Collaborative event",
+];
+
 /* ---------- Project ---------- */
-$pstmt = $pdo->prepare("SELECT * FROM projects WHERE id = :pid AND company_id = :cid LIMIT 1");
-$pstmt->execute([':pid' => $projectId, ':cid' => $companyId]);
+$pstmt = $pdo->prepare("
+  SELECT *
+  FROM projects
+  WHERE id = :pid AND company_id = :cid
+  LIMIT 1
+");
+$pstmt->execute([
+  ':pid' => $projectId,
+  ':cid' => $companyId,
+]);
 $project = $pstmt->fetch();
+
 if (!$project) redirect('projects/index.php');
 
 $adminName = trim((string)($_SESSION['full_name'] ?? ''));
 if ($adminName === '') $adminName = 'Admin';
 
-/* ---------- Columns available ---------- */
-$hasVenue = has_col($pdo, 'project_events', 'venue');
-$hasSide  = has_col($pdo, 'project_events', 'hosting_side');
+/* ---------- Search ---------- */
+$search = trim((string)($_GET['q'] ?? ''));
 
 /* ---------- Events ---------- */
-$select = "id, name, starts_at";
-if ($hasVenue) $select .= ", venue";
-if ($hasSide)  $select .= ", hosting_side";
+$sql = "
+  SELECT id, name, starts_at, venue, hosting_side
+  FROM project_events
+  WHERE project_id = :pid
+";
+$params = [':pid' => $projectId];
+
+if ($search !== '') {
+  $sql .= " AND (
+    name LIKE :q
+    OR venue LIKE :q
+    OR hosting_side LIKE :q
+  )";
+  $params[':q'] = '%' . $search . '%';
+}
+
+$sql .= " ORDER BY starts_at ASC, id ASC";
 
 $events = [];
 try {
-  $es = $pdo->prepare("SELECT $select FROM project_events WHERE project_id = :pid ORDER BY starts_at ASC, id ASC");
-  $es->execute([':pid' => $projectId]);
+  $es = $pdo->prepare($sql);
+  $es->execute($params);
   $events = $es->fetchAll() ?: [];
 } catch (Throwable $e) {
   $events = [];
 }
 
-/* ---------- Needed for project sidebar (avoids warnings) ---------- */
+/* ---------- Needed for project sidebar ---------- */
 $projectDateLabel = 'Date TBD';
 $daysToGo = null;
 
@@ -71,128 +104,195 @@ require_once $root . '/includes/header.php';
 ?>
 
 <style>
-/* Breadcrumb */
-.breadcrumb{
+.breadcrumb{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:rgba(0,0,0,0.55);}
+.breadcrumb a{text-decoration:none;color:rgba(0,0,0,0.55);}
+.breadcrumb .sep{opacity:.55;}
+.subhead{margin-top:6px;color:var(--muted);font-size:13px;}
+
+.tools-row{
   display:flex;
   align-items:center;
-  gap:10px;
-  font-weight:800;
-}
-.breadcrumb a{ text-decoration:none; color:inherit; }
-.breadcrumb .sep{ opacity:.5; }
-
-.subhead{
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.events-toolbar{
-  display:flex;
   justify-content:space-between;
   gap:12px;
-  align-items:center;
-  margin-top: 10px;
+  flex-wrap:wrap;
+  margin-top:14px;
 }
 
-.search-wrap{
-  flex: 1;
-  max-width: 360px;
-}
-.search-wrap input{
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #fff;
-  font-size: 13px;
-}
-
-.toolbar-actions{
+.search-form{
   display:flex;
-  gap:10px;
   align-items:center;
+  gap:10px;
   flex-wrap:wrap;
 }
 
-.icon-btn{
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
+.search-input{
+  width:min(340px, 70vw);
+  height:44px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,0.08);
+  background:rgba(0,0,0,0.03);
+  padding:0 16px;
+  outline:none;
+  font-size:14px;
+}
+.search-input:focus{
+  background:#fff;
+  border-color:rgba(0,0,0,0.16);
+}
+
+.icon-round{
+  width:44px;
+  height:44px;
+  border-radius:999px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
 }
 
-/* Table */
-.events-card{ margin-top: 14px; }
+.events-card{
+  margin-top:16px;
+  border:1px solid rgba(0,0,0,0.06);
+  border-radius:24px;
+  background:#fff;
+  overflow:hidden;
+}
 
 .events-table{
-  width: 100%;
-  border-collapse: collapse;
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
 }
-.events-table th{
+
+.events-table thead th{
   text-align:left;
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 700;
-  padding: 12px 10px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-}
-.events-table td{
-  padding: 14px 10px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  vertical-align: middle;
-  font-size: 14px;
+  font-size:13px;
+  font-weight:800;
+  color:rgba(0,0,0,0.55);
+  padding:18px 20px;
+  border-bottom:1px solid rgba(0,0,0,0.06);
 }
 
-/* Clickable rows */
-.eventRow.is-clickable{ cursor: pointer; }
-.eventRow.is-clickable:hover{
-  background: rgba(0,0,0,0.02);
+.events-table tbody td{
+  padding:16px 20px;
+  vertical-align:middle;
+  border-bottom:1px solid rgba(0,0,0,0.05);
 }
 
-/* Hosting side pill */
-.pill{
+.events-table tbody tr:last-child td{
+  border-bottom:none;
+}
+
+.events-table tbody tr.event-row{
+  cursor:pointer;
+  transition:background 140ms ease;
+}
+
+.events-table tbody tr.event-row:hover{
+  background:rgba(0,0,0,0.015);
+}
+
+.events-table tbody tr.event-row:focus-within,
+.events-table tbody tr.event-row.is-focus{
+  background:rgba(0,0,0,0.02);
+}
+
+.event-name-link{
+  text-decoration:none;
+  color:inherit;
+  font-weight:800;
+  font-size:17px;
+}
+
+.event-name-link:hover{
+  text-decoration:none;
+}
+
+.muted-dash{
+  color:rgba(0,0,0,0.35);
+}
+
+.side-pill{
   display:inline-flex;
   align-items:center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid rgba(0,0,0,0.06);
-  background: rgba(0,0,0,0.05);
-}
-.pill.bride{ background: rgba(210, 160, 255, 0.35); }
-.pill.groom{ background: rgba(120, 200, 255, 0.35); }
-.pill.collab{ background: rgba(0,0,0,0.06); }
-
-.row-title{
-  font-weight: 800;
-  color: #111;
+  justify-content:center;
+  min-height:38px;
+  padding:0 16px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:700;
+  white-space:nowrap;
+  border:1px solid transparent;
 }
 
-.row-chevron{
-  opacity: .45;
+.side-pill.is-empty{
+  background:rgba(0,0,0,0.05);
+  color:rgba(0,0,0,0.40);
+  border-color:rgba(0,0,0,0.06);
+}
+
+.side-pill.is-bride{
+  background:rgba(75,0,31,0.10);
+  color:#4b001f;
+  border-color:rgba(75,0,31,0.14);
+}
+
+.side-pill.is-groom{
+  background:rgba(0,0,0,0.05);
+  color:rgba(0,0,0,0.72);
+  border-color:rgba(0,0,0,0.08);
+}
+
+.side-pill.is-collaborative{
+  background:rgba(0,0,0,0.05);
+  color:rgba(0,0,0,0.72);
+  border-color:rgba(0,0,0,0.08);
+}
+
+.action-cell{
+  width:52px;
   text-align:right;
 }
 
-.empty{
-  padding: 18px;
-  color: var(--muted);
-  font-size: 13px;
+.row-arrow{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:28px;
+  height:28px;
+  border-radius:999px;
+  text-decoration:none;
+  color:rgba(0,0,0,0.45);
+  font-size:20px;
 }
 
-@media (max-width: 1000px){
-  .events-toolbar{ flex-direction: column; align-items: stretch; }
-  .search-wrap{ max-width: none; }
+.row-arrow:hover{
+  background:rgba(0,0,0,0.05);
+  color:rgba(0,0,0,0.75);
+}
+
+.empty-state{
+  margin-top:16px;
+  padding:18px 20px;
+  border:1px solid rgba(0,0,0,0.06);
+  border-radius:24px;
+  background:#fff;
+  color:var(--muted);
+}
+
+@media (max-width: 920px){
+  .events-table{
+    display:block;
+    overflow-x:auto;
+  }
+  .search-input{
+    width:100%;
+    min-width:240px;
+  }
 }
 </style>
 
 <div class="app-shell">
-  <?php
-    $nav_active = 'projects';
-    require_once $root . '/includes/sidebar.php';
-  ?>
+  <?php $nav_active = 'projects'; require_once $root . '/includes/sidebar.php'; ?>
 
   <section class="app-main">
     <div class="topbar">
@@ -204,7 +304,6 @@ require_once $root . '/includes/header.php';
     </div>
 
     <div class="surface">
-      <!-- Project header -->
       <div class="proj-top">
         <div class="proj-top-left">
           <div class="proj-icon"></div>
@@ -227,14 +326,9 @@ require_once $root . '/includes/header.php';
       </div>
 
       <div class="project-shell">
-        <?php
-          $active = 'contract';
-          $contractSection = 'event_details';
-          require_once $root . '/includes/project_sidebar.php';
-        ?>
+        <?php $active = 'contract'; $contractSection = 'event_details'; require_once $root . '/includes/project_sidebar.php'; ?>
 
         <div class="proj-main">
-
           <div class="proj-overview-head">
             <div>
               <div class="breadcrumb">
@@ -243,71 +337,89 @@ require_once $root . '/includes/header.php';
                 <span>Event details</span>
               </div>
               <div class="subhead">Create the agreement, define deliverables, and send it for approval.</div>
-
-              <div class="events-toolbar">
-                <div class="search-wrap">
-                  <input id="eventSearch" type="text" placeholder="Search event" />
-                </div>
-
-                <div class="toolbar-actions">
-                  <button class="btn icon-btn" type="button" title="Download">⬇</button>
-                  <!-- ✅ Add event opens the SAME page used for editing (no eid) -->
-                  <a class="btn btn-primary" href="<?php echo h(base_url('projects/contract_event.php?id=' . $projectId)); ?>">＋ Add event</a>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div class="card proj-card events-card">
-            <?php if (!$events): ?>
-              <div class="empty">
-                No events yet. Click <strong>Add event</strong> to create your first event.
-              </div>
-            <?php else: ?>
-              <table class="events-table" id="eventsTable">
+          <div class="tools-row">
+            <form class="search-form" method="get" action="">
+              <input type="hidden" name="id" value="<?php echo h((string)$projectId); ?>">
+              <input
+                class="search-input"
+                type="text"
+                name="q"
+                value="<?php echo h($search); ?>"
+                placeholder="Search event"
+              >
+              <button class="btn icon-round" type="submit" aria-label="Search">↓</button>
+            </form>
+
+            <div>
+              <a class="btn btn-primary" href="<?php echo h(base_url('projects/contract_event.php?id=' . $projectId)); ?>">＋ Add event</a>
+            </div>
+          </div>
+
+          <?php if (empty($events)): ?>
+            <div class="empty-state">
+              No events yet. Click Add event to create your first event.
+            </div>
+          <?php else: ?>
+            <div class="events-card">
+              <table class="events-table">
                 <thead>
                   <tr>
-                    <th style="width: 32%;">Event name</th>
-                    <th style="width: 18%;">Event date</th>
-                    <th style="width: 28%;">Venue</th>
-                    <th style="width: 16%;">Hosting side</th>
-                    <th style="width: 6%;"></th>
+                    <th>Event name</th>
+                    <th>Event date</th>
+                    <th>Venue</th>
+                    <th>Hosting side</th>
+                    <th class="action-cell"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  <?php foreach ($events as $e): ?>
+                  <?php foreach ($events as $ev): ?>
                     <?php
-                      $eid = (int)($e['id'] ?? 0);
-                      $name = trim((string)($e['name'] ?? 'Event'));
-                      $startsAt = (string)($e['starts_at'] ?? '');
-                      $dateLabel = $startsAt ? date('d/m/Y', strtotime($startsAt)) : '—';
+                      $eid = (int)($ev['id'] ?? 0);
+                      $editHref = base_url('projects/contract_event.php?id=' . $projectId . '&eid=' . $eid);
 
-                      $venue = $hasVenue ? trim((string)($e['venue'] ?? '')) : '';
-                      $venueLabel = $venue !== '' ? $venue : '—';
+                      $eventName = trim((string)($ev['name'] ?? 'Untitled event'));
+                      if ($eventName === '') $eventName = 'Untitled event';
 
-                      $side = $hasSide ? trim((string)($e['hosting_side'] ?? '')) : '';
-                      $sideLabel = $side !== '' ? $side : '—';
+                      $eventDate = !empty($ev['starts_at']) ? date('d/m/Y', strtotime((string)$ev['starts_at'])) : '—';
 
-                      $sideKey = 'collab';
-                      $s = strtolower($sideLabel);
-                      if (strpos($s, 'bride') !== false) $sideKey = 'bride';
-                      else if (strpos($s, 'groom') !== false) $sideKey = 'groom';
+                      $venueText = trim((string)($ev['venue'] ?? ''));
+                      if ($venueText === '') $venueText = '—';
 
-                      $href = base_url('projects/contract_event.php?id=' . $projectId . '&eid=' . $eid);
+                      $sideKey = normalize_hosting_side((string)($ev['hosting_side'] ?? ''));
+                      $sideLabel = $sideKey !== '' ? ($SIDE_LABEL[$sideKey] ?? '—') : '—';
+                      $sideClass = $sideKey !== '' ? (' is-' . $sideKey) : ' is-empty';
                     ?>
-                    <!-- ✅ Entire row clickable -->
-                    <tr class="eventRow is-clickable" data-href="<?php echo h($href); ?>">
-                      <td class="row-title"><?php echo h($name); ?></td>
-                      <td><?php echo h($dateLabel); ?></td>
-                      <td><?php echo h($venueLabel); ?></td>
-                      <td><span class="pill <?php echo h($sideKey); ?>"><?php echo h($sideLabel); ?></span></td>
-                      <td class="row-chevron">›</td>
+                    <tr class="event-row" data-href="<?php echo h($editHref); ?>" tabindex="0">
+                      <td>
+                        <a class="event-name-link" href="<?php echo h($editHref); ?>">
+                          <?php echo h($eventName); ?>
+                        </a>
+                      </td>
+                      <td><?php echo h($eventDate); ?></td>
+                      <td>
+                        <?php if ($venueText === '—'): ?>
+                          <span class="muted-dash">—</span>
+                        <?php else: ?>
+                          <?php echo h($venueText); ?>
+                        <?php endif; ?>
+                      </td>
+                      <td>
+                        <span class="side-pill<?php echo h($sideClass); ?>">
+                          <?php echo h($sideLabel); ?>
+                        </span>
+                      </td>
+                      <td class="action-cell">
+                        <a class="row-arrow" href="<?php echo h($editHref); ?>" aria-label="Edit event">›</a>
+                      </td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
               </table>
-            <?php endif; ?>
-          </div>
+            </div>
+          <?php endif; ?>
 
         </div>
       </div>
@@ -316,24 +428,31 @@ require_once $root . '/includes/header.php';
 </div>
 
 <script>
-(function(){
-  // Row click → edit event
-  document.querySelectorAll('.eventRow.is-clickable').forEach((row) => {
-    row.addEventListener('click', (e) => {
-      const href = row.getAttribute('data-href');
-      if (!href) return;
-      window.location.href = href;
-    });
-  });
+(function () {
+  const rows = Array.from(document.querySelectorAll('.event-row[data-href]'));
+  if (!rows.length) return;
 
-  // Search filter
-  const search = document.getElementById('eventSearch');
-  search?.addEventListener('input', () => {
-    const q = (search.value || '').toLowerCase().trim();
-    document.querySelectorAll('.eventRow').forEach((row) => {
-      const txt = (row.querySelector('.row-title')?.textContent || '').toLowerCase();
-      row.style.display = (q === '' || txt.includes(q)) ? '' : 'none';
+  function go(row) {
+    const href = row.getAttribute('data-href');
+    if (href) window.location.href = href;
+  }
+
+  rows.forEach((row) => {
+    row.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target.closest('a, button, input, select, textarea, label')) return;
+      go(row);
     });
+
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        go(row);
+      }
+    });
+
+    row.addEventListener('focus', () => row.classList.add('is-focus'));
+    row.addEventListener('blur', () => row.classList.remove('is-focus'));
   });
 })();
 </script>
