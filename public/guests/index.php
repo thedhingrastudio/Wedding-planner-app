@@ -22,27 +22,48 @@ function esc($v): string {
   return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 }
 
-function table_exists(PDO $pdo, string $table): bool {
+function table_exists_local(PDO $pdo, string $table): bool {
   try {
-    $st = $pdo->prepare("SHOW TABLES LIKE :table");
+    $st = $pdo->prepare("
+      SELECT COUNT(*)
+      FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name = :table
+    ");
     $st->execute([':table' => $table]);
-    return (bool)$st->fetchColumn();
+    return (int)$st->fetchColumn() > 0;
   } catch (Throwable $e) {
     return false;
   }
 }
 
-function safe_count(PDO $pdo, string $sql, array $params = []): int {
-  try {
-    $st = $pdo->prepare($sql);
-    $st->execute($params);
-    return (int)($st->fetchColumn() ?: 0);
-  } catch (Throwable $e) {
-    return 0;
-  }
+function side_label(string $side): string {
+  return match ($side) {
+    'bride' => "Bride's side",
+    'groom' => "Groom's side",
+    'both'  => "Both families",
+    default => '—',
+  };
 }
 
-/* ---------- Project ---------- */
+function guest_tags_from_row(array $row): array {
+  $tags = [];
+
+  $accessibility = trim((string)($row['accessibility'] ?? ''));
+  $diet = trim((string)($row['diet_preference'] ?? ''));
+  $plusOne = (int)($row['plus_one_allowed'] ?? 0);
+
+  if ($accessibility === 'elder_care') $tags[] = 'Elder';
+  if ($accessibility === 'wheelchair') $tags[] = 'Assist';
+  if ($accessibility === 'medical') $tags[] = 'Medical';
+  if ($accessibility === 'toddler_care') $tags[] = 'Toddler care';
+  if ($diet === 'jain') $tags[] = 'Jain';
+  if ($diet === 'vegan') $tags[] = 'Vegan';
+  if ($plusOne === 1) $tags[] = 'Plus-one';
+
+  return array_values(array_unique($tags));
+}
+
 $pstmt = $pdo->prepare("
   SELECT *
   FROM projects
@@ -60,9 +81,16 @@ if (!$project) {
   redirect('projects/index.php');
 }
 
-/* ---------- Top meta ---------- */
 $adminName = trim((string)($_SESSION['full_name'] ?? ''));
 if ($adminName === '') $adminName = 'Admin';
+
+$partner1 = trim((string)($project['partner1_name'] ?? ''));
+$partner2 = trim((string)($project['partner2_name'] ?? ''));
+$projectTitle = trim((string)($project['title'] ?? ''));
+
+if ($projectTitle === '') {
+  $projectTitle = trim(($partner1 !== '' ? $partner1 : 'Partner 1') . ' weds ' . ($partner2 !== '' ? $partner2 : 'Partner 2'));
+}
 
 $firstEvent = null;
 try {
@@ -94,21 +122,12 @@ if ($firstEvent && !empty($firstEvent['starts_at'])) {
   }
 }
 
-/* keep project sidebar happy */
 $projectDateLabel = $topDateLabel;
 
-/* ---------- Team count ---------- */
 $teamCount = 0;
 try {
   $tc = $pdo->prepare("
-    SELECT COUNT(DISTINCT
-      CASE
-        WHEN company_member_id IS NOT NULL THEN CONCAT('cm:', company_member_id)
-        WHEN user_id IS NOT NULL THEN CONCAT('u:', user_id)
-        WHEN email IS NOT NULL THEN CONCAT('e:', email)
-        ELSE CONCAT('row:', id)
-      END
-    ) AS c
+    SELECT COUNT(*)
     FROM project_members
     WHERE project_id = :pid
   ");
@@ -118,82 +137,143 @@ try {
   $teamCount = 0;
 }
 
-/* ---------- Guests summary ---------- */
-$guestTableExists = table_exists($pdo, 'guests');
+$guestTableExists = table_exists_local($pdo, 'guests');
+$searchQ = trim((string)($_GET['q'] ?? ''));
 
-$guestCountTotal = 0;
+$guestRows = [];
+$guestCountRows = 0;
+$guestHeadCountTotal = 0;
+$guestAdultCount = 0;
+$guestChildrenCount = 0;
 $missingPhoneCount = 0;
 $missingEmailCount = 0;
+$ungroupedCount = 0;
+$groupsCreatedCount = 0;
+$careTagCount = 0;
+$duplicateNames = [];
 
 if ($guestTableExists) {
-  $guestCountTotal = safe_count(
-    $pdo,
-    "SELECT COUNT(*) FROM guests WHERE project_id = :pid",
-    [':pid' => $projectId]
-  );
+  $sql = "
+    SELECT *
+    FROM guests
+    WHERE project_id = :pid
+  ";
+  $params = [':pid' => $projectId];
 
-  if ($guestCountTotal > 0) {
-    $missingPhoneCount = safe_count(
-      $pdo,
-      "SELECT COUNT(*) FROM guests WHERE project_id = :pid AND (phone IS NULL OR TRIM(phone) = '')",
-      [':pid' => $projectId]
-    );
-
-    $missingEmailCount = safe_count(
-      $pdo,
-      "SELECT COUNT(*) FROM guests WHERE project_id = :pid AND (email IS NULL OR TRIM(email) = '')",
-      [':pid' => $projectId]
-    );
+  if ($searchQ !== '') {
+    $sql .= "
+      AND (
+        CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,'')) LIKE :q
+        OR phone LIKE :q
+        OR email LIKE :q
+        OR relation_label LIKE :q
+      )
+    ";
+    $params[':q'] = '%' . $searchQ . '%';
   }
+
+  $sql .= " ORDER BY created_at DESC, id DESC";
+
+  $st = $pdo->prepare($sql);
+  $st->execute($params);
+  $guestRows = $st->fetchAll() ?: [];
+
+  $groupMap = [];
+  $nameMap = [];
+
+  foreach ($guestRows as $row) {
+    $seatCount = max(1, (int)($row['seat_count'] ?? 1));
+    $childrenCount = max(0, (int)($row['children_count'] ?? 0));
+
+    $guestHeadCountTotal += $seatCount;
+    $guestChildrenCount += $childrenCount;
+    $guestAdultCount += max($seatCount - $childrenCount, 0);
+
+    $phone = trim((string)($row['phone'] ?? ''));
+    $email = trim((string)($row['email'] ?? ''));
+    $group = trim((string)($row['relation_label'] ?? ''));
+
+    if ($phone === '') $missingPhoneCount++;
+    if ($email === '') $missingEmailCount++;
+    if ($group === '') $ungroupedCount++;
+
+    if ($group !== '') {
+      $groupMap[strtolower($group)] = $group;
+    }
+
+    $accessibility = trim((string)($row['accessibility'] ?? ''));
+    if (in_array($accessibility, ['elder_care', 'wheelchair', 'medical', 'toddler_care'], true)) {
+      $careTagCount++;
+    }
+
+    $fullName = strtolower(trim((string)($row['first_name'] ?? '') . ' ' . (string)($row['last_name'] ?? '')));
+    if ($fullName !== '') {
+      $nameMap[$fullName] = ($nameMap[$fullName] ?? 0) + 1;
+    }
+  }
+
+  foreach ($nameMap as $name => $count) {
+    if ($count > 1) {
+      $duplicateNames[$name] = $count;
+    }
+  }
+
+  $groupsCreatedCount = count($groupMap);
+  $guestCountRows = count($guestRows);
 }
 
-$hasGuests = $guestCountTotal > 0;
+$projectBriefEstimate = (int)($project['guest_count_est'] ?? 0);
+$hasGuests = $guestCountRows > 0;
 
-$partner1 = trim((string)($project['partner1_name'] ?? ''));
-$partner2 = trim((string)($project['partner2_name'] ?? ''));
+$overviewTotalLabel = $hasGuests
+  ? number_format($guestHeadCountTotal)
+  : ($projectBriefEstimate > 0 ? number_format($projectBriefEstimate) : '—');
 
-$projectTitle = trim((string)($project['title'] ?? 'Wedding project'));
-if ($projectTitle === '') {
-  $projectTitle = trim(($partner1 !== '' ? $partner1 : 'Partner 1') . ' weds ' . ($partner2 !== '' ? $partner2 : 'Partner 2'));
-}
-
-$overviewTotalLabel = $hasGuests ? number_format($guestCountTotal) : '—';
-$missingPhoneLabel = $hasGuests ? number_format($missingPhoneCount) : '—';
-$missingEmailLabel = $hasGuests ? number_format($missingEmailCount) : '—';
+$overviewAdultsLabel   = $hasGuests ? number_format($guestAdultCount) : '—';
+$overviewChildrenLabel = $hasGuests ? number_format($guestChildrenCount) : '—';
+$missingPhoneLabel     = $hasGuests ? number_format($missingPhoneCount) : '—';
+$missingEmailLabel     = $hasGuests ? number_format($missingEmailCount) : '—';
 
 $pageTitle = $projectTitle . ' — Guest list setup — Vidhaan';
 require_once $root . '/includes/header.php';
 ?>
 
 <style>
+.proj-main{
+  min-width:0;
+}
+
 .guest-head{
   display:flex;
   align-items:flex-start;
   justify-content:space-between;
-  gap:14px;
-  margin-bottom:14px;
+  gap:16px;
+  margin-bottom:16px;
 }
 .guest-head .left h2{
   margin:0;
   font-size:22px;
+  line-height:1.15;
   font-weight:800;
+  color:#1d1d1f;
 }
 .guest-head .left p{
-  margin:6px 0 0 0;
-  color:var(--muted);
+  margin:8px 0 0 0;
+  color:#6f6f73;
   font-size:13px;
+  line-height:1.45;
 }
 .guest-badge{
   display:inline-flex;
   align-items:center;
   gap:8px;
-  margin-left:10px;
-  font-size:12px;
+  margin-left:12px;
+  font-size:11px;
   padding:6px 10px;
-  border:1px solid var(--border);
+  border:1px solid rgba(0,0,0,0.06);
   border-radius:999px;
   background:#fff;
-  color:#222;
+  color:#4b4b4f;
   vertical-align:middle;
 }
 .guest-actions{
@@ -203,74 +283,108 @@ require_once $root . '/includes/header.php';
   flex-wrap:wrap;
 }
 .guest-actions .icon-btn{
-  width:38px;
-  height:38px;
+  width:42px;
+  height:42px;
+  min-width:42px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
   border-radius:999px;
+  padding:0;
 }
 .btn[disabled]{
   opacity:.55;
   cursor:not-allowed;
   pointer-events:none;
 }
+
+/* Top 3 cards */
 .guest-grid{
   display:grid;
-  grid-template-columns:1.15fr 1.05fr 1.15fr;
+  grid-template-columns:minmax(0,1fr) minmax(0,.95fr) minmax(290px,.92fr);
   gap:14px;
   align-items:start;
 }
-@media (max-width:1100px){
+@media (max-width:1180px){
   .guest-grid{
     grid-template-columns:1fr;
   }
 }
-.guest-note{
-  margin-top:10px;
-  color:var(--muted);
+
+.guest-panel{
+  display:flex;
+  flex-direction:column;
+  padding:16px;
+  border-radius:22px;
+}
+.guest-panel--compact{
+  min-height:182px;
+}
+.guest-panel--health{
+  padding:16px;
+}
+
+.guest-panel-title{
+  margin:0;
+  font-size:18px;
+  line-height:1.2;
+  font-weight:800;
+  color:#222;
+}
+.guest-panel-sub{
+  margin:6px 0 0 0;
+  color:#75757a;
   font-size:13px;
-  line-height:1.5;
+  line-height:1.45;
 }
 .guest-file-list{
-  margin:12px 0 0 0;
+  margin:14px 0 0 0;
   padding-left:18px;
   color:#222;
   font-size:13px;
-  line-height:1.6;
+  line-height:1.65;
 }
-.card-actions-end{
-  display:flex;
-  justify-content:flex-end;
-  margin-top:16px;
+.helper-soft{
+  margin-top:14px;
+  padding:14px 16px;
+  border-radius:18px;
+  background:#f7f7f8;
+  border:1px solid rgba(0,0,0,0.03);
+  color:#6d6d72;
+  font-size:13px;
+  line-height:1.55;
 }
 .soft-stat{
   margin-top:14px;
   padding:12px 14px;
-  border:1px solid rgba(0,0,0,0.06);
-  border-radius:16px;
-  background:rgba(0,0,0,0.02);
+  border:1px solid rgba(0,0,0,0.04);
+  border-radius:18px;
+  background:#f7f7f8;
   font-size:13px;
-  color:#222;
+  color:#2c2c2f;
 }
-.helper-empty{
-  margin-top:12px;
-  padding:12px 14px;
-  border-radius:16px;
-  background:rgba(0,0,0,0.03);
-  color:var(--muted);
-  font-size:13px;
-  line-height:1.5;
+.card-actions-end{
+  margin-top:auto;
+  padding-top:16px;
+  display:flex;
+  justify-content:flex-end;
+  align-items:flex-end;
 }
+
+/* Health card */
 .health-wrap{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:2px;
   margin-top:10px;
 }
 .health-group{
   border-top:1px solid rgba(0,0,0,0.06);
-  padding-top:8px;
+  padding-top:10px;
+}
+.health-group:first-child{
+  border-top:none;
+  padding-top:0;
 }
 .health-group summary{
   list-style:none;
@@ -279,7 +393,7 @@ require_once $root . '/includes/header.php';
   align-items:center;
   justify-content:space-between;
   font-size:13px;
-  font-weight:700;
+  font-weight:800;
   color:#222;
   padding:4px 0 8px;
 }
@@ -288,7 +402,7 @@ require_once $root . '/includes/header.php';
 }
 .health-group summary::after{
   content:'⌄';
-  color:var(--muted);
+  color:#8a8a90;
   font-weight:400;
 }
 .health-group[open] summary::after{
@@ -297,36 +411,164 @@ require_once $root . '/includes/header.php';
 .health-list{
   display:flex;
   flex-direction:column;
-  gap:8px;
-  padding:2px 0 2px 0;
+  gap:10px;
+  padding:2px 0 4px 0;
 }
 .health-row{
   display:grid;
   grid-template-columns:1fr auto;
-  gap:10px;
+  gap:12px;
   align-items:start;
   font-size:13px;
-  color:#222;
+  color:#2a2a2d;
 }
 .health-row .label{
-  color:#333;
+  color:#5d5d63;
 }
 .health-row .value{
-  color:var(--muted);
+  color:#3a3a40;
   font-weight:700;
+}
+.subtle-note{
+  margin-top:8px;
+  color:#7b7b82;
+  font-size:12px;
+}
+
+/* Search + table */
+.guest-toolbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:14px;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+}
+.guest-search{
+  flex:1 1 360px;
+}
+.guest-search-wrap{
+  position:relative;
+}
+.guest-search-wrap .search-ico{
+  position:absolute;
+  left:14px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#9a9aa1;
+  font-size:13px;
+  pointer-events:none;
+}
+.guest-search input{
+  width:100%;
+  min-height:40px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,0.08);
+  background:#fff;
+  padding:10px 14px 10px 36px;
+  box-sizing:border-box;
+  color:#1f1f22;
+}
+.guest-search input::placeholder{
+  color:#9b9ba2;
+}
+.table-select-btn{
+  white-space:nowrap;
+}
+
+.guest-table-card{
+  padding:6px 12px 8px;
+  border-radius:24px;
+}
+.guest-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+}
+.guest-table thead th{
+  text-align:left;
+  padding:14px 16px 12px;
+  font-size:12px;
+  color:#9a9aa1;
+  font-weight:700;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+}
+.guest-table tbody td{
+  text-align:left;
+  padding:14px 16px;
+  border-bottom:1px solid rgba(0,0,0,0.05);
+  vertical-align:middle;
+  font-size:14px;
+  color:#1f1f22;
+}
+.guest-table tbody tr:last-child td{
+  border-bottom:none;
+}
+.guest-name{
+  font-weight:500;
+  color:#1d1d1f;
+}
+.guest-side{
+  color:#4f4f55;
+  font-size:13px;
+}
+
+.table-chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:28px;
+  padding:0 12px;
+  border-radius:999px;
+  font-size:12px;
+  white-space:nowrap;
+  border:none;
+}
+.table-chip.ok{
+  background:#dff1cf;
+  color:#54733e;
+}
+.table-chip.warn{
+  background:#f4cccc;
+  color:#875050;
+}
+.table-chip.neutral{
+  background:#efefef;
+  color:#7b7b82;
+}
+.tag-stack{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.empty-table{
+  padding:16px;
+  border-radius:18px;
+  background:rgba(0,0,0,0.02);
+  color:#75757a;
+  font-size:13px;
+  line-height:1.5;
 }
 .guest-tip{
   margin-top:14px;
   padding:14px 16px;
   border-radius:18px;
-  border:1px dashed rgba(0,0,0,0.12);
+  border:1px dashed rgba(0,0,0,0.10);
   background:#fff;
-  color:var(--muted);
+  color:#727279;
   font-size:13px;
   line-height:1.55;
 }
-</style>
 
+@media (max-width:980px){
+  .guest-head{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
+</style>
 <div class="app-shell">
   <?php
     $nav_active = 'projects';
@@ -389,10 +631,9 @@ require_once $root . '/includes/header.php';
           </div>
 
           <div class="guest-grid">
-
-            <div class="card proj-card">
-              <div class="proj-card-title">Import guest list</div>
-              <div class="proj-card-sub">Upload the client’s Excel or CSV and organize it before invites go out.</div>
+            <div class="card proj-card guest-panel guest-panel--compact">
+              <h3 class="guest-panel-title">Import guest list</h3>
+              <div class="guest-panel-sub">Upload the client’s Excel or CSV and organize it before invites go out.</div>
 
               <ul class="guest-file-list">
                 <li>Expected sheet: Groom’s side guest list</li>
@@ -401,10 +642,10 @@ require_once $root . '/includes/header.php';
 
               <?php if ($hasGuests): ?>
                 <div class="soft-stat">
-                  <?php echo esc(number_format($guestCountTotal)); ?> guests currently in this project.
+                  <?php echo esc(number_format($guestCountRows)); ?> guest records currently in this project.
                 </div>
               <?php else: ?>
-                <div class="helper-empty">
+                <div class="helper-soft">
                   No files attached yet. Start with the client’s master sheet or upload separate bride-side and groom-side lists.
                 </div>
               <?php endif; ?>
@@ -414,28 +655,28 @@ require_once $root . '/includes/header.php';
               </div>
             </div>
 
-            <div class="card proj-card">
-              <div class="proj-card-title">Manually add guests</div>
-              <div class="proj-card-sub">Fill guest details manually to add to the guest list.</div>
+            <div class="card proj-card guest-panel guest-panel--compact">
+              <h3 class="guest-panel-title">Manually add guests</h3>
+              <div class="guest-panel-sub">Fill guest details manually to add to the guest list.</div>
 
               <?php if ($hasGuests): ?>
-                <div class="soft-stat">
-                  Guest list started. You can keep adding individuals, families, and plus-ones here.
+                <div class="helper-soft">
+                  Manual guest entry is active. Add individuals, families, and last-minute guests here.
                 </div>
               <?php else: ?>
-                <div class="helper-empty">
+                <div class="helper-soft">
                   No guests added yet. Use this when the client shares a few names first or when you need to add last-minute guests manually.
                 </div>
               <?php endif; ?>
 
               <div class="card-actions-end">
-  <a class="btn" href="<?php echo esc(base_url('guests/create.php?project_id=' . $projectId)); ?>">Add guest</a>
-</div>
+                <a class="btn" href="<?php echo esc(base_url('guests/create.php?project_id=' . $projectId)); ?>">Add guest</a>
+              </div>
             </div>
 
-            <div class="card proj-card">
-              <div class="proj-card-title">Guest list health</div>
-              <div class="proj-card-sub">What needs cleaning before invites go out.</div>
+            <div class="card proj-card guest-panel guest-panel--health">
+              <h3 class="guest-panel-title">Guest list health</h3>
+              <div class="guest-panel-sub">What needs cleaning before invites go out.</div>
 
               <div class="health-wrap">
                 <details class="health-group" open>
@@ -447,13 +688,16 @@ require_once $root . '/includes/header.php';
                     </div>
                     <div class="health-row">
                       <div class="label">Estimated head count (adults)</div>
-                      <div class="value">—</div>
+                      <div class="value"><?php echo esc($overviewAdultsLabel); ?></div>
                     </div>
                     <div class="health-row">
                       <div class="label">Estimated head count (children)</div>
-                      <div class="value">—</div>
+                      <div class="value"><?php echo esc($overviewChildrenLabel); ?></div>
                     </div>
                   </div>
+                  <?php if ($projectBriefEstimate > 0): ?>
+                    <div class="subtle-note">Project brief estimate: <?php echo esc(number_format($projectBriefEstimate)); ?></div>
+                  <?php endif; ?>
                 </details>
 
                 <details class="health-group" open>
@@ -469,42 +713,143 @@ require_once $root . '/includes/header.php';
                     </div>
                     <div class="health-row">
                       <div class="label">Unassigned groups</div>
-                      <div class="value">—</div>
+                      <div class="value"><?php echo $hasGuests ? esc((string)$ungroupedCount) : '—'; ?></div>
                     </div>
                     <div class="health-row">
                       <div class="label">VIP / Elder care tags</div>
-                      <div class="value">—</div>
+                      <div class="value"><?php echo $hasGuests ? esc((string)$careTagCount) : '—'; ?></div>
                     </div>
                   </div>
                 </details>
 
-                <details class="health-group">
+                <details class="health-group" open>
                   <summary>Duplicate review</summary>
                   <div class="health-list">
-                    <div class="health-row">
-                      <div class="label">Potential duplicates</div>
-                      <div class="value">—</div>
-                    </div>
+                    <?php if ($duplicateNames): ?>
+                      <?php foreach ($duplicateNames as $name => $count): ?>
+                        <div class="health-row">
+                          <div class="label"><?php echo esc(ucwords($name)); ?></div>
+                          <div class="value"><?php echo esc((string)$count); ?></div>
+                        </div>
+                      <?php endforeach; ?>
+                    <?php else: ?>
+                      <div class="health-row">
+                        <div class="label">No duplicate names flagged yet</div>
+                        <div class="value">0</div>
+                      </div>
+                    <?php endif; ?>
                   </div>
                 </details>
 
-                <details class="health-group">
+                <details class="health-group" open>
                   <summary>Guest groups</summary>
                   <div class="health-list">
                     <div class="health-row">
-                      <div class="label">Family or household groups</div>
-                      <div class="value">—</div>
+                      <div class="label">Groups created</div>
+                      <div class="value"><?php echo $hasGuests ? esc((string)$groupsCreatedCount) : '—'; ?></div>
+                    </div>
+                    <div class="health-row">
+                      <div class="label">Ungrouped</div>
+                      <div class="value"><?php echo $hasGuests ? esc((string)$ungroupedCount) : '—'; ?></div>
                     </div>
                   </div>
                 </details>
               </div>
             </div>
+          </div>
 
+          <div class="guest-toolbar">
+            <form class="guest-search" method="get">
+              <input type="hidden" name="project_id" value="<?php echo esc((string)$projectId); ?>">
+              <div class="guest-search-wrap">
+                <span class="search-ico">🔍</span>
+                <input type="text" name="q" value="<?php echo esc($searchQ); ?>" placeholder="Search guest name, contact, or group">
+              </div>
+            </form>
+
+            <button class="btn table-select-btn" type="button">✓ Select all</button>
+          </div>
+
+          <div class="card proj-card guest-table-card">
+            <?php if ($hasGuests): ?>
+              <table class="guest-table">
+                <thead>
+                  <tr>
+                    <th>Guest name</th>
+                    <th>Side</th>
+                    <th>Contact</th>
+                    <th>Group</th>
+                    <th>Tag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <?php foreach ($guestRows as $row): ?>
+                    <?php
+                      $fullName = trim(
+                        trim((string)($row['title'] ?? '')) . ' ' .
+                        trim((string)($row['first_name'] ?? '')) . ' ' .
+                        trim((string)($row['last_name'] ?? ''))
+                      );
+
+                      $phone = trim((string)($row['phone'] ?? ''));
+                      $email = trim((string)($row['email'] ?? ''));
+                      $group = trim((string)($row['relation_label'] ?? ''));
+                      $tags  = guest_tags_from_row($row);
+
+                      if ($phone !== '' && $email !== '') {
+                        $contactLabel = 'Phone + email';
+                        $contactTone = 'ok';
+                      } elseif ($phone !== '') {
+                        $contactLabel = 'Phone no.';
+                        $contactTone = 'ok';
+                      } elseif ($email !== '') {
+                        $contactLabel = 'Email';
+                        $contactTone = 'ok';
+                      } else {
+                        $contactLabel = 'Missing';
+                        $contactTone = 'warn';
+                      }
+                    ?>
+                    <tr>
+                      <td class="guest-name"><?php echo esc($fullName !== '' ? $fullName : 'Unnamed guest'); ?></td>
+                      <td class="guest-side"><?php echo esc(side_label((string)($row['invited_by'] ?? ''))); ?></td>
+                      <td>
+                        <span class="table-chip <?php echo esc($contactTone); ?>">
+                          <?php echo esc($contactLabel); ?>
+                        </span>
+                      </td>
+                      <td>
+                        <?php if ($group !== ''): ?>
+                          <span class="table-chip ok"><?php echo esc($group); ?></span>
+                        <?php else: ?>
+                          <span class="table-chip neutral">-</span>
+                        <?php endif; ?>
+                      </td>
+                      <td>
+                        <?php if ($tags): ?>
+                          <div class="tag-stack">
+                            <?php foreach ($tags as $tag): ?>
+                              <span class="table-chip ok"><?php echo esc($tag); ?></span>
+                            <?php endforeach; ?>
+                          </div>
+                        <?php else: ?>
+                          <span class="table-chip neutral">-</span>
+                        <?php endif; ?>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            <?php else: ?>
+              <div class="empty-table">
+                No guests saved yet. Once you save the first guest from the manual form, the table will appear here.
+              </div>
+            <?php endif; ?>
           </div>
 
           <?php if (!$hasGuests): ?>
             <div class="guest-tip">
-              This is the empty state for the guest workflow. Once the first guest import is wired up, this page can become the starting point for duplicate review, tags, group assignment, and export.
+              This is the empty state for the guest workflow. After the first guest is saved, this page becomes the working guest list with search, counts, and cleanup checks.
             </div>
           <?php endif; ?>
         </div>

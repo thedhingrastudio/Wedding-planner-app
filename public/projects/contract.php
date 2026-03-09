@@ -305,6 +305,216 @@ $clientHostPhone = join_non_empty([
 
 
 $pageTitle = (string)($project['title'] ?? 'Project') . ' — Contract & scope — Vidhaan';
+
+if (!function_exists('local_table_exists')) {
+  function local_table_exists(PDO $pdo, string $table): bool {
+    try {
+      $st = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = :table
+      ");
+      $st->execute([':table' => $table]);
+      return (int)$st->fetchColumn() > 0;
+    } catch (Throwable $e) {
+      return false;
+    }
+  }
+}
+
+if (!function_exists('format_inr')) {
+  function format_inr(float $amount): string {
+    $negative = $amount < 0;
+    $amount = abs($amount);
+
+    $parts = explode('.', number_format($amount, 2, '.', ''));
+    $integer = $parts[0];
+    $decimal = $parts[1] ?? '00';
+
+    if (strlen($integer) > 3) {
+      $last3 = substr($integer, -3);
+      $rest = substr($integer, 0, -3);
+      $rest = preg_replace("/\B(?=(\d{2})+(?!\d))/", ",", $rest);
+      $integer = $rest . ',' . $last3;
+    }
+
+    return ($negative ? '-₹ ' : '₹ ') . $integer . '.' . $decimal;
+  }
+}
+
+if (!function_exists('milestone_percent_label')) {
+  function milestone_percent_label(float $amount, float $total): string {
+    if ($total <= 0) return '';
+    $pct = ($amount / $total) * 100;
+    $rounded = round($pct, 1);
+    $display = ((float)(int)$rounded === (float)$rounded)
+      ? (string)(int)$rounded
+      : number_format($rounded, 1);
+    return $display . '% of total';
+  }
+}
+
+$paymentTerms = null;
+$paymentMilestones = [];
+$paymentTotal = 0.0;
+$paymentGstNote = '';
+
+if (local_table_exists($pdo, 'project_payment_terms')) {
+  try {
+    $pt = $pdo->prepare("
+      SELECT *
+      FROM project_payment_terms
+      WHERE project_id = :pid
+      LIMIT 1
+    ");
+    $pt->execute([':pid' => $projectId]);
+    $paymentTerms = $pt->fetch() ?: null;
+  } catch (Throwable $e) {
+    $paymentTerms = null;
+  }
+}
+
+if ($paymentTerms) {
+  $paymentTotal = (float)($paymentTerms['total_amount'] ?? 0);
+  $paymentGstNote = trim((string)($paymentTerms['gst_note'] ?? ''));
+
+  if (local_table_exists($pdo, 'project_payment_milestones')) {
+    try {
+      $pm = $pdo->prepare("
+        SELECT *
+        FROM project_payment_milestones
+        WHERE payment_terms_id = :tid
+        ORDER BY sort_order ASC, id ASC
+      ");
+      $pm->execute([':tid' => (int)$paymentTerms['id']]);
+      $paymentMilestones = $pm->fetchAll() ?: [];
+    } catch (Throwable $e) {
+      $paymentMilestones = [];
+    }
+  }
+}
+
+/* ---------- CLIENT RESPONSIBILITIES SUMMARY ---------- */
+if (!function_exists('local_table_exists')) {
+  function local_table_exists(PDO $pdo, string $table): bool {
+    try {
+      $st = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = :table
+      ");
+      $st->execute([':table' => $table]);
+      return (int)$st->fetchColumn() > 0;
+    } catch (Throwable $e) {
+      return false;
+    }
+  }
+}
+
+if (!function_exists('responsibility_due_label')) {
+  function responsibility_due_label(?string $date): string {
+    if (!$date) return '';
+    $ts = strtotime($date);
+    return $ts ? date('d/m/y', $ts) : '';
+  }
+}
+
+$clientResponsibilitiesPreview = [];
+$clientResponsibilitiesCount = 0;
+
+if (local_table_exists($pdo, 'project_client_responsibilities')) {
+  try {
+    $cr = $pdo->prepare("
+      SELECT id, title, due_date, priority, status
+      FROM project_client_responsibilities
+      WHERE project_id = :pid
+      ORDER BY due_date IS NULL, due_date ASC, id DESC
+      LIMIT 5
+    ");
+    $cr->execute([':pid' => $projectId]);
+    $clientResponsibilitiesPreview = $cr->fetchAll() ?: [];
+
+    $crc = $pdo->prepare("
+      SELECT COUNT(*)
+      FROM project_client_responsibilities
+      WHERE project_id = :pid
+    ");
+    $crc->execute([':pid' => $projectId]);
+    $clientResponsibilitiesCount = (int)$crc->fetchColumn();
+  } catch (Throwable $e) {
+    $clientResponsibilitiesPreview = [];
+    $clientResponsibilitiesCount = 0;
+  }
+}
+
+/* ---------- STAFFING PLAN SUMMARY ---------- */
+if (!function_exists('staffing_role_label')) {
+  function staffing_role_label(string $role): string {
+    $map = [
+      'team_lead'    => 'Team lead',
+      'coordination' => 'Coordination',
+      'rsvp'         => 'RSVP team',
+      'hospitality'  => 'Hospitality',
+      'transport'    => 'Transport',
+      'vendor'       => 'Vendor',
+    ];
+
+    $role = trim($role);
+    if ($role === '') return '—';
+
+    return $map[$role] ?? ucfirst(str_replace('_', ' ', $role));
+  }
+}
+
+$staffingPreview = [];
+$staffingPreviewCount = 0;
+
+try {
+  $sp = $pdo->prepare("
+    SELECT
+      COALESCE(NULLIF(pm.display_name, ''), NULLIF(cm.full_name, ''), NULLIF(pm.email, ''), 'Team member') AS member_name,
+      GROUP_CONCAT(
+        DISTINCT COALESCE(
+          NULLIF(pm.responsibility_label, ''),
+          NULLIF(pm.department, ''),
+          NULLIF(pm.role, '')
+        )
+        ORDER BY COALESCE(
+          NULLIF(pm.responsibility_label, ''),
+          NULLIF(pm.department, ''),
+          NULLIF(pm.role, '')
+        )
+        SEPARATOR '||'
+      ) AS raw_responsibilities
+    FROM project_members pm
+    LEFT JOIN company_members cm
+      ON cm.id = pm.company_member_id
+    WHERE pm.project_id = :pid
+    GROUP BY COALESCE(NULLIF(pm.display_name, ''), NULLIF(cm.full_name, ''), NULLIF(pm.email, ''), 'Team member')
+    ORDER BY member_name ASC
+    LIMIT 5
+  ");
+  $sp->execute([':pid' => $projectId]);
+  $staffingPreview = $sp->fetchAll() ?: [];
+
+  $spc = $pdo->prepare("
+    SELECT COUNT(DISTINCT
+      COALESCE(NULLIF(pm.display_name, ''), NULLIF(cm.full_name, ''), NULLIF(pm.email, ''), CONCAT('member-', pm.id))
+    )
+    FROM project_members pm
+    LEFT JOIN company_members cm
+      ON cm.id = pm.company_member_id
+    WHERE pm.project_id = :pid
+  ");
+  $spc->execute([':pid' => $projectId]);
+  $staffingPreviewCount = (int)($spc->fetchColumn() ?: 0);
+} catch (Throwable $e) {
+  $staffingPreview = [];
+  $staffingPreviewCount = 0;
+}
+
 require_once $root . '/includes/header.php';
 ?>
 
@@ -417,6 +627,113 @@ require_once $root . '/includes/header.php';
 @media (max-width:700px){
   .info-row{ grid-template-columns:1fr; }
 }
+
+.payment-summary{
+  margin-top:12px;
+}
+.payment-row{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:14px;
+  align-items:start;
+  padding:6px 0;
+}
+.payment-row .k{
+  font-size:14px;
+  color:#3f3f45;
+}
+.payment-row .v{
+  font-size:14px;
+  color:#232326;
+  text-align:right;
+  font-weight:600;
+}
+.payment-row .meta{
+  display:block;
+  margin-top:2px;
+  font-size:12px;
+  color:var(--muted);
+  font-weight:400;
+}
+.payment-empty{
+  margin-top:12px;
+  padding:12px 14px;
+  border-radius:16px;
+  background:rgba(0,0,0,0.03);
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.5;
+}
+
+.staffing-mini-section{
+  margin-top:14px;
+}
+.staffing-mini-heading{
+  font-size:16px;
+  font-weight:500;
+  color:#2f2f34;
+  margin-bottom:8px;
+}
+.staffing-mini-divider{
+  height:1px;
+  background:rgba(0,0,0,0.08);
+  margin-bottom:6px;
+}
+.staffing-mini-list{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+}
+.staffing-mini-row{
+  display:grid;
+  grid-template-columns:minmax(120px, 42%) minmax(140px, 58%);
+  gap:16px;
+  align-items:start;
+  padding:4px 0;
+}
+.staffing-mini-name{
+  min-width:0;
+  font-size:14px;
+  color:#4a4a50;
+  line-height:1.45;
+  word-break:normal;
+}
+.staffing-mini-role{
+  min-width:0;
+  text-align:left;
+  font-size:14px;
+  color:#5e5e64;
+  line-height:1.45;
+  word-break:normal;
+}
+.staffing-mini-empty{
+  margin-top:12px;
+  padding:12px 14px;
+  border-radius:16px;
+  background:rgba(0,0,0,0.03);
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.5;
+}
+.staffing-mini-note{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+@media (max-width:520px){
+  .staffing-mini-row{
+    grid-template-columns:1fr;
+    gap:2px;
+  }
+
+  .staffing-mini-role{
+    text-align:left;
+    font-size:13px;
+    color:var(--muted);
+  }
+}
+
 </style>
 
 <div class="app-shell">
@@ -551,13 +868,51 @@ require_once $root . '/includes/header.php';
               </div>
             </div>
 
-            <div class="card proj-card card-minh">
-              <div class="proj-card-title">Payment terms</div>
-              <div class="proj-card-sub">Total fee, milestones, and cancellation terms.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
-                <button class="btn" type="button">Edit payment schedule</button>
-              </div>
-            </div>
+            <div class="card proj-card">
+  <div class="proj-card-title">Payment terms</div>
+  <div class="proj-card-sub">Total fee and payment schedule.</div>
+
+  <?php if ($paymentTerms): ?>
+    <div class="payment-summary">
+      <div class="payment-row">
+        <div class="k">Total fee:</div>
+        <div class="v">
+          <?php echo esc(format_inr($paymentTotal)); ?>
+          <?php if ($paymentGstNote !== ''): ?>
+            <?php echo ' ' . esc($paymentGstNote); ?>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <?php foreach ($paymentMilestones as $milestone): ?>
+        <?php
+          $mAmount = (float)($milestone['amount'] ?? 0);
+          $mLabel = trim((string)($milestone['phase_label'] ?? 'Milestone'));
+          $mPercent = milestone_percent_label($mAmount, $paymentTotal);
+        ?>
+        <div class="payment-row">
+          <div class="k"><?php echo esc($mLabel); ?>:</div>
+          <div class="v">
+            <?php echo esc(format_inr($mAmount)); ?>
+            <?php if ($mPercent !== ''): ?>
+              <span class="meta"><?php echo esc($mPercent); ?></span>
+            <?php endif; ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php else: ?>
+    <div class="payment-empty">
+      No payment schedule added yet. Add total fee, due date, and milestones.
+    </div>
+  <?php endif; ?>
+
+  <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+    <a class="btn" href="<?php echo esc(base_url('projects/contract_payment_terms.php?id=' . $projectId)); ?>">
+      Edit payment schedule
+    </a>
+  </div>
+</div>
 
             <div class="card proj-card">
   <div class="proj-card-title">Parties &amp; contacts</div>
@@ -645,20 +1000,95 @@ require_once $root . '/includes/header.php';
             </div>
 
             <div class="card proj-card">
-              <div class="proj-card-title">Client responsibilities</div>
-              <div class="proj-card-sub">Confirm dates, venue, and requirements on time.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
-                <button class="btn" type="button">Edit details</button>
-              </div>
-            </div>
+  <div class="proj-card-title">Client responsibilities</div>
+  <div class="proj-card-sub">Use the client must provide to keep things moving.</div>
 
-            <div class="card proj-card card-minh">
-              <div class="proj-card-title">Staffing plan</div>
-              <div class="proj-card-sub">Set the team size needed for execution.</div>
-              <div style="display:flex; justify-content:flex-end; margin-top:14px;">
-                <button class="btn" type="button">Edit details</button>
-              </div>
-            </div>
+  <?php if ($clientResponsibilitiesPreview): ?>
+    <div class="contract-mini-list">
+      <?php foreach ($clientResponsibilitiesPreview as $item): ?>
+        <?php
+          $itemTitle = trim((string)($item['title'] ?? ''));
+          $itemDue = responsibility_due_label((string)($item['due_date'] ?? ''));
+        ?>
+        <div class="contract-mini-row">
+          <div class="contract-mini-left">
+            <span class="contract-mini-bullet">•</span>
+            <span class="contract-mini-title"><?php echo esc($itemTitle !== '' ? $itemTitle : 'Untitled responsibility'); ?></span>
+          </div>
+          <div class="contract-mini-date">
+            <?php echo esc($itemDue !== '' ? $itemDue : ''); ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <?php if ($clientResponsibilitiesCount > count($clientResponsibilitiesPreview)): ?>
+      <div class="contract-mini-note">
+        +<?php echo esc((string)($clientResponsibilitiesCount - count($clientResponsibilitiesPreview))); ?> more responsibilities
+      </div>
+    <?php endif; ?>
+  <?php else: ?>
+    <div class="contract-mini-empty">
+      No client responsibilities added yet.
+    </div>
+  <?php endif; ?>
+
+  <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+    <a class="btn" href="<?php echo esc(base_url('projects/contract_client_responsibilities.php?id=' . $projectId)); ?>">
+      Edit details
+    </a>
+  </div>
+</div>
+
+            <div class="card proj-card">
+  <div class="proj-card-title">Staffing plan</div>
+  <div class="proj-card-sub">Team members planned for on-ground execution.</div>
+
+  <?php if ($staffingPreview): ?>
+    <div class="staffing-mini-section">
+      <div class="staffing-mini-heading">Team requirements</div>
+      <div class="staffing-mini-divider"></div>
+
+      <div class="staffing-mini-list">
+        <?php foreach ($staffingPreview as $member): ?>
+          <?php
+            $memberName = trim((string)($member['member_name'] ?? 'Team member'));
+            $rawResponsibilities = trim((string)($member['raw_responsibilities'] ?? ''));
+            $responsibilityParts = $rawResponsibilities !== '' ? array_filter(array_map('trim', explode('||', $rawResponsibilities))) : [];
+            $responsibilityParts = array_values(array_unique($responsibilityParts));
+
+            $responsibilityLabels = [];
+            foreach ($responsibilityParts as $part) {
+              $responsibilityLabels[] = staffing_role_label($part);
+            }
+
+            $responsibilityText = $responsibilityLabels ? implode(', ', $responsibilityLabels) : '—';
+          ?>
+          <div class="staffing-mini-row">
+            <div class="staffing-mini-name"><?php echo esc($memberName); ?></div>
+            <div class="staffing-mini-role"><?php echo esc($responsibilityText); ?></div>
+          </div>
+        <?php endforeach; ?>
+      </div>
+
+      <?php if ($staffingPreviewCount > count($staffingPreview)): ?>
+        <div class="staffing-mini-note">
+          +<?php echo esc((string)($staffingPreviewCount - count($staffingPreview))); ?> more team members
+        </div>
+      <?php endif; ?>
+    </div>
+  <?php else: ?>
+    <div class="staffing-mini-empty">
+      No team members assigned yet.
+    </div>
+  <?php endif; ?>
+
+  <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+    <a class="btn" href="<?php echo esc(base_url('projects/team.php?id=' . $projectId)); ?>">
+      Edit details
+    </a>
+  </div>
+</div>
 
             <div class="card proj-card card-minh">
               <div class="proj-card-title">Notes &amp; files</div>

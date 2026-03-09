@@ -31,6 +31,25 @@ function posted_array(string $key): array {
   return is_array($value) ? $value : [];
 }
 
+function selected_attr(string $current, string $value): string {
+  return $current === $value ? 'selected' : '';
+}
+
+function local_table_exists(PDO $pdo, string $table): bool {
+  try {
+    $st = $pdo->prepare("
+      SELECT COUNT(*)
+      FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name = :table
+    ");
+    $st->execute([':table' => $table]);
+    return (int)$st->fetchColumn() > 0;
+  } catch (Throwable $e) {
+    return false;
+  }
+}
+
 /* ---------- Project ---------- */
 $pstmt = $pdo->prepare("
   SELECT *
@@ -51,7 +70,9 @@ if (!$project) {
 
 /* ---------- Top meta ---------- */
 $adminName = trim((string)($_SESSION['full_name'] ?? ''));
-if ($adminName === '') $adminName = 'Admin';
+if ($adminName === '') {
+  $adminName = 'Admin';
+}
 
 $firstEvent = null;
 try {
@@ -90,7 +111,7 @@ $projectDateLabel = $topDateLabel;
 $teamCount = 0;
 try {
   $tc = $pdo->prepare("
-    SELECT COUNT(*) 
+    SELECT COUNT(*)
     FROM project_members
     WHERE project_id = :pid
   ");
@@ -111,8 +132,6 @@ if ($projectTitle === '') {
 
 /* ---------- Events for invite mapping ---------- */
 $events = [];
-$eventsError = '';
-
 try {
   $es = $pdo->prepare("
     SELECT id, name, starts_at, venue, hosting_side
@@ -124,7 +143,184 @@ try {
   $events = $es->fetchAll() ?: [];
 } catch (Throwable $e) {
   $events = [];
-  $eventsError = $e->getMessage();
+}
+
+/* ---------- Table checks ---------- */
+$guestsTableReady = local_table_exists($pdo, 'guests');
+$guestInvitesTableReady = local_table_exists($pdo, 'guest_event_invites');
+$currentDb = (string)($pdo->query("SELECT DATABASE()")->fetchColumn() ?: '');
+
+
+/* ---------- Save ---------- */
+$errors = [];
+$allowedEventIds = array_map('intval', array_column($events, 'id'));
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  if (!$guestsTableReady) {
+    $errors[] = 'Guests table is missing. Please create the guests table first.';
+  }
+
+  $userId = (int)($_SESSION['user_id'] ?? 0);
+
+  $title             = trim((string)($_POST['title'] ?? ''));
+  $invitedBy         = trim((string)($_POST['invited_by'] ?? ''));
+  $firstName         = trim((string)($_POST['first_name'] ?? ''));
+  $lastName          = trim((string)($_POST['last_name'] ?? ''));
+  $relationLabel     = trim((string)($_POST['relation_label'] ?? ''));
+  $city              = trim((string)($_POST['city'] ?? ''));
+  $seatCount         = max(1, (int)($_POST['seat_count'] ?? 1));
+  $childrenCount     = max(0, (int)($_POST['children_count'] ?? 0));
+  $plusOneAllowed    = (int)($_POST['plus_one_allowed'] ?? 0) === 1 ? 1 : 0;
+
+  $phone             = trim((string)($_POST['phone'] ?? ''));
+  $email             = trim((string)($_POST['email'] ?? ''));
+  $address           = trim((string)($_POST['address'] ?? ''));
+
+  $accessibility     = trim((string)($_POST['accessibility'] ?? ''));
+  $specialNotes      = trim((string)($_POST['special_notes'] ?? ''));
+  $dietPreference    = trim((string)($_POST['diet_preference'] ?? ''));
+  $allergies         = trim((string)($_POST['allergies'] ?? ''));
+
+  $pickupRequired    = (int)($_POST['pickup_required'] ?? 0) === 1 ? 1 : 0;
+  $dropRequired      = (int)($_POST['drop_required'] ?? 0) === 1 ? 1 : 0;
+  $arrivalDate       = trim((string)($_POST['arrival_date'] ?? '')) ?: null;
+  $arrivalTime       = trim((string)($_POST['arrival_time'] ?? '')) ?: null;
+  $arrivalRef        = trim((string)($_POST['arrival_ref'] ?? ''));
+  $arrivalTerminal   = trim((string)($_POST['arrival_terminal'] ?? ''));
+  $departureDate     = trim((string)($_POST['departure_date'] ?? '')) ?: null;
+  $departureTime     = trim((string)($_POST['departure_time'] ?? '')) ?: null;
+  $departureRef      = trim((string)($_POST['departure_ref'] ?? ''));
+  $transportNotes    = trim((string)($_POST['transport_notes'] ?? ''));
+
+  $checkinDate       = trim((string)($_POST['checkin_date'] ?? '')) ?: null;
+  $checkoutDate      = trim((string)($_POST['checkout_date'] ?? '')) ?: null;
+  $roomType          = trim((string)($_POST['room_type'] ?? ''));
+  $bedType           = trim((string)($_POST['bed_type'] ?? ''));
+  $idDocumentNote    = trim((string)($_POST['id_document_note'] ?? ''));
+  $stayNotes         = trim((string)($_POST['stay_notes'] ?? ''));
+
+  $eventIds = array_map('intval', $_POST['event_ids'] ?? []);
+  $eventIds = array_values(array_unique(array_intersect($eventIds, $allowedEventIds)));
+
+  if ($firstName === '') {
+    $errors[] = 'Enter the guest first name.';
+  }
+
+  if (!in_array($invitedBy, ['bride', 'groom', 'both'], true)) {
+    $errors[] = 'Select who invited this guest.';
+  }
+
+  if ($childrenCount > $seatCount) {
+    $errors[] = 'Children count cannot be greater than total seats.';
+  }
+
+  if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    $errors[] = 'Enter a valid email address.';
+  }
+
+  if (!$errors) {
+    try {
+      $pdo->beginTransaction();
+
+      $stmt = $pdo->prepare("
+        INSERT INTO guests (
+          project_id, title, invited_by, first_name, last_name, relation_label, city,
+          seat_count, children_count, plus_one_allowed,
+          phone, email, address,
+          accessibility, special_notes, diet_preference, allergies,
+          pickup_required, drop_required,
+          arrival_date, arrival_time, arrival_ref, arrival_terminal,
+          departure_date, departure_time, departure_ref,
+          transport_notes,
+          checkin_date, checkout_date, room_type, bed_type,
+          id_document_note, stay_notes,
+          created_by, created_at, updated_at
+        ) VALUES (
+          :project_id, :title, :invited_by, :first_name, :last_name, :relation_label, :city,
+          :seat_count, :children_count, :plus_one_allowed,
+          :phone, :email, :address,
+          :accessibility, :special_notes, :diet_preference, :allergies,
+          :pickup_required, :drop_required,
+          :arrival_date, :arrival_time, :arrival_ref, :arrival_terminal,
+          :departure_date, :departure_time, :departure_ref,
+          :transport_notes,
+          :checkin_date, :checkout_date, :room_type, :bed_type,
+          :id_document_note, :stay_notes,
+          :created_by, NOW(), NOW()
+        )
+      ");
+
+      $stmt->execute([
+        ':project_id'        => $projectId,
+        ':title'             => $title !== '' ? $title : null,
+        ':invited_by'        => $invitedBy,
+        ':first_name'        => $firstName,
+        ':last_name'         => $lastName !== '' ? $lastName : null,
+        ':relation_label'    => $relationLabel !== '' ? $relationLabel : null,
+        ':city'              => $city !== '' ? $city : null,
+        ':seat_count'        => $seatCount,
+        ':children_count'    => $childrenCount,
+        ':plus_one_allowed'  => $plusOneAllowed,
+        ':phone'             => $phone !== '' ? $phone : null,
+        ':email'             => $email !== '' ? $email : null,
+        ':address'           => $address !== '' ? $address : null,
+        ':accessibility'     => $accessibility !== '' ? $accessibility : null,
+        ':special_notes'     => $specialNotes !== '' ? $specialNotes : null,
+        ':diet_preference'   => $dietPreference !== '' ? $dietPreference : null,
+        ':allergies'         => $allergies !== '' ? $allergies : null,
+        ':pickup_required'   => $pickupRequired,
+        ':drop_required'     => $dropRequired,
+        ':arrival_date'      => $arrivalDate,
+        ':arrival_time'      => $arrivalTime,
+        ':arrival_ref'       => $arrivalRef !== '' ? $arrivalRef : null,
+        ':arrival_terminal'  => $arrivalTerminal !== '' ? $arrivalTerminal : null,
+        ':departure_date'    => $departureDate,
+        ':departure_time'    => $departureTime,
+        ':departure_ref'     => $departureRef !== '' ? $departureRef : null,
+        ':transport_notes'   => $transportNotes !== '' ? $transportNotes : null,
+        ':checkin_date'      => $checkinDate,
+        ':checkout_date'     => $checkoutDate,
+        ':room_type'         => $roomType !== '' ? $roomType : null,
+        ':bed_type'          => $bedType !== '' ? $bedType : null,
+        ':id_document_note'  => $idDocumentNote !== '' ? $idDocumentNote : null,
+        ':stay_notes'        => $stayNotes !== '' ? $stayNotes : null,
+        ':created_by'        => $userId > 0 ? $userId : null,
+      ]);
+
+      $guestId = (int)$pdo->lastInsertId();
+
+      if ($guestInvitesTableReady && $eventIds) {
+        $link = $pdo->prepare("
+          INSERT INTO guest_event_invites (guest_id, event_id, created_at)
+          VALUES (:guest_id, :event_id, NOW())
+        ");
+
+        foreach ($eventIds as $eventId) {
+          $link->execute([
+            ':guest_id' => $guestId,
+            ':event_id' => $eventId,
+          ]);
+        }
+      }
+
+      $pdo->commit();
+
+      if (function_exists('flash_set')) {
+        flash_set('success', 'Guest saved successfully.');
+      }
+
+      if (isset($_POST['save_add_another'])) {
+        redirect('guests/create.php?project_id=' . $projectId);
+      }
+
+      redirect('guests/index.php?project_id=' . $projectId);
+    } catch (Throwable $e) {
+      if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+      }
+      $errors[] = 'Save failed: ' . $e->getMessage();
+    }
+  }
 }
 
 $pageTitle = 'Add guest — ' . $projectTitle . ' — Vidhaan';
@@ -139,7 +335,20 @@ require_once $root . '/includes/header.php';
   gap:16px;
   margin-bottom:16px;
 }
-
+.guest-create-title{
+  margin:0;
+  font-size:24px;
+  line-height:1.2;
+  font-weight:800;
+  color:#151515;
+}
+.guest-create-sub{
+  margin:8px 0 0 0;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.55;
+  max-width:700px;
+}
 .guest-create-actions{
   display:flex;
   gap:10px;
@@ -149,23 +358,19 @@ require_once $root . '/includes/header.php';
   white-space:nowrap;
   flex:0 0 auto;
 }
-
 .guest-create-actions .btn{
   white-space:nowrap;
 }
-
 @media (max-width:980px){
   .guest-create-head{
     flex-direction:column;
     align-items:flex-start;
   }
-
   .guest-create-actions{
     width:100%;
     flex-wrap:wrap;
     justify-content:flex-start;
   }
-} 
 }
 .guest-layout{
   display:grid;
@@ -250,12 +455,6 @@ require_once $root . '/includes/header.php';
   border-color:rgba(0,0,0,0.28);
   box-shadow:0 0 0 3px rgba(0,0,0,0.04);
 }
-.field-help{
-  margin-top:4px;
-  font-size:12px;
-  color:var(--muted);
-  line-height:1.45;
-}
 .invite-grid{
   display:grid;
   grid-template-columns:repeat(2, minmax(0,1fr));
@@ -305,12 +504,6 @@ require_once $root . '/includes/header.php';
   height:1px;
   background:rgba(0,0,0,0.08);
   margin:18px 0 2px;
-}
-.mini-actions{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top:16px;
 }
 .info-note{
   margin-top:16px;
@@ -394,6 +587,20 @@ require_once $root . '/includes/header.php';
         ?>
 
         <div class="proj-main">
+          <?php if ($errors): ?>
+  <div class="card proj-card" style="margin-bottom:14px; border:1px solid rgba(185,28,28,.15); background:#fff7f7;">
+    <div class="proj-card-title" style="font-size:16px; color:#991b1b;">Please fix these fields</div>
+    <ul style="margin:10px 0 0 18px; color:#991b1b; font-size:13px; line-height:1.6;">
+      <?php foreach ($errors as $error): ?>
+        <li><?php echo esc($error); ?></li>
+      <?php endforeach; ?>
+    </ul>
+    <div style="margin-top:10px; color:#7f1d1d; font-size:12px;">
+      Connected DB: <?php echo esc($currentDb); ?>
+    </div>
+  </div>
+<?php endif; ?>
+
           <div class="guest-create-head">
             <div>
               <h1 class="guest-create-title">Add guest details</h1>
@@ -404,12 +611,12 @@ require_once $root . '/includes/header.php';
 
             <div class="guest-create-actions">
               <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId)); ?>">Cancel</a>
-              <button class="btn" type="button">Save &amp; add another</button>
-              <button class="btn btn-primary" type="button">Save guest</button>
+              <button class="btn" type="submit" form="guest-create-form" name="save_add_another" value="1">Save &amp; add another</button>
+              <button class="btn btn-primary" type="submit" form="guest-create-form" name="save_guest" value="1">Save guest</button>
             </div>
           </div>
 
-          <form method="post" action="" autocomplete="off">
+          <form id="guest-create-form" method="post" action="" autocomplete="off">
             <div class="guest-layout">
 
               <div class="guest-col">
@@ -422,10 +629,10 @@ require_once $root . '/includes/header.php';
                       <label for="title">Title</label>
                       <select id="title" name="title">
                         <option value="">Select title</option>
-                        <option value="Mr">Mr</option>
-                        <option value="Ms">Ms</option>
-                        <option value="Mrs">Mrs</option>
-                        <option value="Dr">Dr</option>
+                        <option value="Mr" <?php echo selected_attr(posted('title'), 'Mr'); ?>>Mr</option>
+                        <option value="Ms" <?php echo selected_attr(posted('title'), 'Ms'); ?>>Ms</option>
+                        <option value="Mrs" <?php echo selected_attr(posted('title'), 'Mrs'); ?>>Mrs</option>
+                        <option value="Dr" <?php echo selected_attr(posted('title'), 'Dr'); ?>>Dr</option>
                       </select>
                     </div>
 
@@ -433,9 +640,9 @@ require_once $root . '/includes/header.php';
                       <label for="invited_by">Invited by</label>
                       <select id="invited_by" name="invited_by">
                         <option value="">Select side</option>
-                        <option value="bride">Bride’s side</option>
-                        <option value="groom">Groom’s side</option>
-                        <option value="both">Both families</option>
+                        <option value="bride" <?php echo selected_attr(posted('invited_by'), 'bride'); ?>>Bride’s side</option>
+                        <option value="groom" <?php echo selected_attr(posted('invited_by'), 'groom'); ?>>Groom’s side</option>
+                        <option value="both" <?php echo selected_attr(posted('invited_by'), 'both'); ?>>Both families</option>
                       </select>
                     </div>
 
@@ -463,20 +670,20 @@ require_once $root . '/includes/header.php';
                   <div class="form-grid-3">
                     <div class="field">
                       <label for="seat_count">Number of seats</label>
-                      <input id="seat_count" name="seat_count" type="number" min="1" placeholder="1" value="<?php echo esc(posted('seat_count')); ?>">
+                      <input id="seat_count" name="seat_count" type="number" min="1" placeholder="1" value="<?php echo esc(posted('seat_count', '1')); ?>">
                     </div>
 
                     <div class="field">
                       <label for="children_count">Number of children</label>
-                      <input id="children_count" name="children_count" type="number" min="0" placeholder="0" value="<?php echo esc(posted('children_count')); ?>">
+                      <input id="children_count" name="children_count" type="number" min="0" placeholder="0" value="<?php echo esc(posted('children_count', '0')); ?>">
                     </div>
 
                     <div class="field">
                       <label for="plus_one_allowed">Plus-one</label>
                       <select id="plus_one_allowed" name="plus_one_allowed">
                         <option value="">Select</option>
-                        <option value="0">Not included</option>
-                        <option value="1">Allowed</option>
+                        <option value="0" <?php echo selected_attr(posted('plus_one_allowed'), '0'); ?>>Not included</option>
+                        <option value="1" <?php echo selected_attr(posted('plus_one_allowed'), '1'); ?>>Allowed</option>
                       </select>
                     </div>
                   </div>
@@ -528,8 +735,8 @@ require_once $root . '/includes/header.php';
                       <label for="pickup_required">Pickup needed</label>
                       <select id="pickup_required" name="pickup_required">
                         <option value="">Select</option>
-                        <option value="1">Yes</option>
-                        <option value="0">No</option>
+                        <option value="1" <?php echo selected_attr(posted('pickup_required'), '1'); ?>>Yes</option>
+                        <option value="0" <?php echo selected_attr(posted('pickup_required'), '0'); ?>>No</option>
                       </select>
                     </div>
 
@@ -537,8 +744,8 @@ require_once $root . '/includes/header.php';
                       <label for="drop_required">Drop needed</label>
                       <select id="drop_required" name="drop_required">
                         <option value="">Select</option>
-                        <option value="1">Yes</option>
-                        <option value="0">No</option>
+                        <option value="1" <?php echo selected_attr(posted('drop_required'), '1'); ?>>Yes</option>
+                        <option value="0" <?php echo selected_attr(posted('drop_required'), '0'); ?>>No</option>
                       </select>
                     </div>
                   </div>
@@ -607,10 +814,10 @@ require_once $root . '/includes/header.php';
                       <label for="room_type">Room type</label>
                       <select id="room_type" name="room_type">
                         <option value="">Select room type</option>
-                        <option value="suite">Suite</option>
-                        <option value="deluxe">Deluxe</option>
-                        <option value="standard">Standard</option>
-                        <option value="family">Family room</option>
+                        <option value="suite" <?php echo selected_attr(posted('room_type'), 'suite'); ?>>Suite</option>
+                        <option value="deluxe" <?php echo selected_attr(posted('room_type'), 'deluxe'); ?>>Deluxe</option>
+                        <option value="standard" <?php echo selected_attr(posted('room_type'), 'standard'); ?>>Standard</option>
+                        <option value="family" <?php echo selected_attr(posted('room_type'), 'family'); ?>>Family room</option>
                       </select>
                     </div>
 
@@ -618,10 +825,10 @@ require_once $root . '/includes/header.php';
                       <label for="bed_type">Bed type</label>
                       <select id="bed_type" name="bed_type">
                         <option value="">Select bed type</option>
-                        <option value="king">King</option>
-                        <option value="queen">Queen</option>
-                        <option value="twin">Twin</option>
-                        <option value="extra_bed">Extra bed required</option>
+                        <option value="king" <?php echo selected_attr(posted('bed_type'), 'king'); ?>>King</option>
+                        <option value="queen" <?php echo selected_attr(posted('bed_type'), 'queen'); ?>>Queen</option>
+                        <option value="twin" <?php echo selected_attr(posted('bed_type'), 'twin'); ?>>Twin</option>
+                        <option value="extra_bed" <?php echo selected_attr(posted('bed_type'), 'extra_bed'); ?>>Extra bed required</option>
                       </select>
                     </div>
 
@@ -670,11 +877,11 @@ require_once $root . '/includes/header.php';
                       <label for="accessibility">Accessibility / assistance needed</label>
                       <select id="accessibility" name="accessibility">
                         <option value="">Select support need</option>
-                        <option value="none">None</option>
-                        <option value="wheelchair">Wheelchair support</option>
-                        <option value="elder_care">Elder care support</option>
-                        <option value="toddler_care">Toddler care support</option>
-                        <option value="medical">Medical note</option>
+                        <option value="none" <?php echo selected_attr(posted('accessibility'), 'none'); ?>>None</option>
+                        <option value="wheelchair" <?php echo selected_attr(posted('accessibility'), 'wheelchair'); ?>>Wheelchair support</option>
+                        <option value="elder_care" <?php echo selected_attr(posted('accessibility'), 'elder_care'); ?>>Elder care support</option>
+                        <option value="toddler_care" <?php echo selected_attr(posted('accessibility'), 'toddler_care'); ?>>Toddler care support</option>
+                        <option value="medical" <?php echo selected_attr(posted('accessibility'), 'medical'); ?>>Medical note</option>
                       </select>
                     </div>
 
@@ -694,12 +901,12 @@ require_once $root . '/includes/header.php';
                       <label for="diet_preference">Diet preference</label>
                       <select id="diet_preference" name="diet_preference">
                         <option value="">Select diet preference</option>
-                        <option value="veg">Veg</option>
-                        <option value="non_veg">Non-veg</option>
-                        <option value="vegan">Vegan</option>
-                        <option value="jain">Jain</option>
-                        <option value="eggs">Eggs okay</option>
-                        <option value="none">No preference</option>
+                        <option value="veg" <?php echo selected_attr(posted('diet_preference'), 'veg'); ?>>Veg</option>
+                        <option value="non_veg" <?php echo selected_attr(posted('diet_preference'), 'non_veg'); ?>>Non-veg</option>
+                        <option value="vegan" <?php echo selected_attr(posted('diet_preference'), 'vegan'); ?>>Vegan</option>
+                        <option value="jain" <?php echo selected_attr(posted('diet_preference'), 'jain'); ?>>Jain</option>
+                        <option value="eggs" <?php echo selected_attr(posted('diet_preference'), 'eggs'); ?>>Eggs okay</option>
+                        <option value="none" <?php echo selected_attr(posted('diet_preference'), 'none'); ?>>No preference</option>
                       </select>
                     </div>
 
@@ -739,8 +946,8 @@ require_once $root . '/includes/header.php';
 
                   <div class="page-actions-bottom">
                     <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId)); ?>">Back</a>
-                    <button class="btn" type="button">Save &amp; add another</button>
-                    <button class="btn btn-primary" type="button">Save guest</button>
+                    <button class="btn" type="submit" name="save_add_another" value="1">Save &amp; add another</button>
+                    <button class="btn btn-primary" type="submit" name="save_guest" value="1">Save guest</button>
                   </div>
                 </section>
               </div>
