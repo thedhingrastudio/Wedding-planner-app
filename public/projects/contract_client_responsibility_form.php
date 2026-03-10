@@ -7,6 +7,7 @@ while ($root !== dirname($root) && !is_dir($root . '/includes')) {
 }
 
 require_once $root . '/includes/app_start.php';
+require_once $root . '/includes/audit.php';
 require_login();
 
 $pdo = $pdo ?? get_pdo();
@@ -166,6 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errors) {
   if (!$errors) {
     try {
       $userId = (int)($_SESSION['user_id'] ?? 0);
+      $savedResponsibilityId = $responsibilityId > 0 ? $responsibilityId : null;
 
       if ($isEdit) {
         $up = $pdo->prepare("
@@ -208,11 +210,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errors) {
           ':created_by' => $userId > 0 ? $userId : null,
           ':updated_by' => $userId > 0 ? $userId : null,
         ]);
+        $savedResponsibilityId = (int)$pdo->lastInsertId();
       }
 
       if (function_exists('flash_set')) {
         flash_set('success', $isEdit ? 'Client responsibility updated.' : 'Client responsibility added.');
       }
+
+      audit_log([
+        'pdo' => $pdo,
+        'company_id' => $companyId,
+        'project_id' => $projectId,
+        'actor_user_id' => (int)($_SESSION['user_id'] ?? 0),
+        'actor_name' => trim((string)($_SESSION['full_name'] ?? '')) ?: 'Admin',
+        'entity_type' => 'contract_responsibility',
+        'entity_id' => $savedResponsibilityId,
+        'action' => $isEdit ? 'updated' : 'created',
+        'summary' => ($isEdit ? 'Updated client responsibility: ' : 'Created client responsibility: ') . $title,
+        'search_text' => audit_build_search_text([
+          'contract',
+          'client responsibility',
+          $title,
+          $isEdit ? 'updated' : 'created',
+          $projectTitle,
+        ]),
+      ]);
 
       redirect('projects/contract_client_responsibilities.php?id=' . $projectId);
     } catch (Throwable $e) {

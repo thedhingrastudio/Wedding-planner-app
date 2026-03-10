@@ -336,7 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       'entity_type' => 'project_event',
       'entity_id' => $eventId,
       'action' => $wasEdit ? 'updated' : 'created',
-      'summary' => ($wasEdit ? 'Updated event: ' : 'Created event: ') . $name,
+      'summary' => ($wasEdit ? 'Updated contract: Event details — ' : 'Created contract: Event details — ') . $name,
       'diff_json' => [
         'before' => $beforeAudit,
         'after' => $afterAudit,
