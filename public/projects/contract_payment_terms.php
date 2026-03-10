@@ -7,6 +7,7 @@ while ($root !== dirname($root) && !is_dir($root . '/includes')) {
 }
 
 require_once $root . '/includes/app_start.php';
+require_once $root . '/includes/audit.php';
 require_login();
 
 $pdo = $pdo ?? get_pdo();
@@ -301,6 +302,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errors) {
   }
 
   if (!$errors) {
+    $wasExistingTerms = $terms !== null;
+
     try {
       $pdo->beginTransaction();
 
@@ -371,6 +374,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errors) {
       if (function_exists('flash_set')) {
         flash_set('success', 'Payment terms saved successfully.');
       }
+
+      audit_log([
+        'pdo' => $pdo,
+        'company_id' => $companyId,
+        'project_id' => $projectId,
+        'actor_user_id' => (int)($_SESSION['user_id'] ?? 0),
+        'actor_name' => trim((string)($_SESSION['full_name'] ?? '')) ?: 'Admin',
+        'entity_type' => 'contract',
+        'entity_id' => $termsId > 0 ? $termsId : null,
+        'action' => $wasExistingTerms ? 'updated' : 'created',
+        'summary' => $wasExistingTerms ? 'Updated contract: Payment terms' : 'Created contract: Payment terms',
+        'search_text' => audit_build_search_text([
+          'contract',
+          'payment terms',
+          $wasExistingTerms ? 'updated' : 'created',
+          $projectTitle,
+        ]),
+      ]);
 
       redirect('projects/contract.php?id=' . $projectId);
     } catch (Throwable $e) {
