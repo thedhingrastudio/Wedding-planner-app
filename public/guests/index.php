@@ -1447,7 +1447,7 @@ require_once $root . '/includes/header.php';
                   $selectedRsvp = guest_pick($selectedGuest, ['rsvp_status', 'rsvp', 'invite_status', 'status']);
                   $selectedRespondedOn = guest_pick($selectedGuest, ['responded_on', 'rsvp_responded_at', 'responded_at', 'updated_at']);
                   $selectedTags = guest_tags_from_row($selectedGuest);
-                  $selectedTagText = $selectedTags ? implode(', ', $selectedTags) : guest_pick($selectedGuest, ['tag', 'tags']);
+                  $selectedTagText = $selectedTags ? implode(', ', $selectedTags) : guest_pick($selectedGuest, ['guest_tag', 'tag', 'tags', 'guest_tags']);
 
                   $contactComplete = has_any_value([$selectedPhone, $selectedEmail]);
                   $contactStatus = guest_section_status($contactComplete);

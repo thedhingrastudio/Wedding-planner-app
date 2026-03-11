@@ -41,6 +41,33 @@ function local_table_exists(PDO $pdo, string $table): bool {
   }
 }
 
+function local_first_existing_column(PDO $pdo, string $table, array $columns): ?string {
+  try {
+    $st = $pdo->prepare("
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = :table
+    ");
+    $st->execute([':table' => $table]);
+
+    $existing = array_map(
+      static fn($v) => strtolower((string)$v),
+      array_column($st->fetchAll() ?: [], 'column_name')
+    );
+
+    foreach ($columns as $column) {
+      if (in_array(strtolower($column), $existing, true)) {
+        return $column;
+      }
+    }
+
+    return null;
+  } catch (Throwable $e) {
+    return null;
+  }
+}
+
 function normalize_date_input(?string $value): ?string {
   $value = trim((string)$value);
   return $value !== '' ? $value : null;
@@ -164,6 +191,7 @@ try {
 /* ---------- Table checks ---------- */
 $guestsTableReady = local_table_exists($pdo, 'guests');
 $guestInvitesTableReady = local_table_exists($pdo, 'guest_event_invites');
+$guestTagColumn = local_first_existing_column($pdo, 'guests', ['guest_tag', 'tag', 'tags']);
 $currentDb = (string)($pdo->query("SELECT DATABASE()")->fetchColumn() ?: '');
 
 /* ---------- Edit mode ---------- */
@@ -215,6 +243,7 @@ if ($existingGuest) {
     'invited_by'       => (string)($existingGuest['invited_by'] ?? ''),
     'first_name'       => (string)($existingGuest['first_name'] ?? ''),
     'last_name'        => (string)($existingGuest['last_name'] ?? ''),
+    'guest_tag'        => $guestTagColumn ? (string)($existingGuest[$guestTagColumn] ?? '') : '',
     'relation_label'   => (string)($existingGuest['relation_label'] ?? ''),
     'city'             => (string)($existingGuest['city'] ?? ''),
     'seat_count'       => (string)($existingGuest['seat_count'] ?? '1'),
@@ -257,14 +286,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   $postedGuestId = (int)($_POST['guest_id'] ?? 0);
-  $editingThisGuest = $postedGuestId > 0;
+$editingThisGuest = $postedGuestId > 0;
 
-  $userId = (int)($_SESSION['user_id'] ?? 0);
+if (isset($_POST['delete_guest'])) {
+  if (!$editingThisGuest) {
+    $errors[] = 'This guest record could not be found for deletion.';
+  } else {
+    try {
+      $pdo->beginTransaction();
+
+      if ($guestInvitesTableReady) {
+        $delInvites = $pdo->prepare("
+          DELETE FROM guest_event_invites
+          WHERE guest_id = :guest_id
+        ");
+        $delInvites->execute([
+          ':guest_id' => $postedGuestId,
+        ]);
+      }
+
+      $delGuest = $pdo->prepare("
+        DELETE FROM guests
+        WHERE id = :guest_id
+          AND project_id = :project_id
+        LIMIT 1
+      ");
+      $delGuest->execute([
+        ':guest_id'   => $postedGuestId,
+        ':project_id' => $projectId,
+      ]);
+
+      if ((int)$delGuest->rowCount() < 1) {
+        throw new RuntimeException('Guest could not be deleted.');
+      }
+
+      $pdo->commit();
+
+      if (function_exists('flash_set')) {
+        flash_set('success', 'Guest removed from the guest list.');
+      }
+
+      redirect('guests/index.php?project_id=' . $projectId);
+    } catch (Throwable $e) {
+      if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+      }
+      $errors[] = 'Delete failed: ' . $e->getMessage();
+    }
+  }
+}
+
+$userId = (int)($_SESSION['user_id'] ?? 0);
 
   $title             = trim((string)($_POST['title'] ?? ''));
   $invitedBy         = trim((string)($_POST['invited_by'] ?? ''));
   $firstName         = trim((string)($_POST['first_name'] ?? ''));
   $lastName          = trim((string)($_POST['last_name'] ?? ''));
+  $guestTag          = trim((string)($_POST['guest_tag'] ?? ''));
   $relationLabel     = trim((string)($_POST['relation_label'] ?? ''));
   $city              = trim((string)($_POST['city'] ?? ''));
   $seatCount         = max(1, (int)($_POST['seat_count'] ?? 1));
@@ -485,6 +563,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
         $savedGuestId = (int)$pdo->lastInsertId();
+      }
+
+      if ($guestTagColumn !== null) {
+        $tagSql = "UPDATE guests
+                   SET {$guestTagColumn} = :guest_tag, updated_at = NOW()
+                   WHERE id = :guest_id AND project_id = :project_id
+                   LIMIT 1";
+        $tagStmt = $pdo->prepare($tagSql);
+        $tagStmt->execute([
+          ':guest_tag'  => $guestTag !== '' ? $guestTag : null,
+          ':guest_id'   => $savedGuestId,
+          ':project_id' => $projectId,
+        ]);
       }
 
       if ($guestInvitesTableReady) {
@@ -789,10 +880,8 @@ require_once $root . '/includes/header.php';
         </div>
 
         <div class="proj-top-actions">
-          <a class="btn btn-primary" href="<?php echo esc(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-          <a class="btn" href="<?php echo esc(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-          <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Contract & scope">⚙</a>
-        </div>
+  <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Contract & scope">⚙</a>
+</div>
       </div>
 
       <div class="project-shell">
@@ -823,10 +912,14 @@ require_once $root . '/includes/header.php';
             </div>
 
             <div class="guest-create-actions">
-              <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId . ($isEditMode ? '&guest_id=' . $guestId : ''))); ?>">Cancel</a>
-              <button class="btn" type="submit" form="guest-create-form" name="save_add_another" value="1">Save &amp; add another</button>
-              <button class="btn btn-primary" type="submit" form="guest-create-form" name="save_guest" value="1"><?php echo esc($pagePrimaryAction); ?></button>
-            </div>
+  <?php if ($isEditMode): ?>
+    <button class="btn btn-danger-outline" type="submit" form="guest-delete-form">Delete guest</button>
+  <?php endif; ?>
+
+  <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId . ($isEditMode ? '&guest_id=' . $guestId : ''))); ?>">Cancel</a>
+  <button class="btn" type="submit" form="guest-create-form" name="save_add_another" value="1">Save &amp; add another</button>
+  <button class="btn btn-primary" type="submit" form="guest-create-form" name="save_guest" value="1"><?php echo esc($pagePrimaryAction); ?></button>
+</div>
           </div>
 
           <form id="guest-create-form" method="post" action="" autocomplete="off">
@@ -872,6 +965,18 @@ require_once $root . '/includes/header.php';
                       <label for="last_name">Last name</label>
                       <input id="last_name" name="last_name" type="text" placeholder="Enter last name" value="<?php echo esc(request_value('last_name', $defaults)); ?>">
                     </div>
+
+                    <div class="field" style="grid-column:1 / -1;">
+  <label for="guest_tag">Guest tag</label>
+  <select id="guest_tag" name="guest_tag">
+    <option value="">Select guest tag</option>
+    <option value="VIP" <?php echo selected_attr(request_value('guest_tag', $defaults), 'VIP'); ?>>VIP</option>
+    <option value="Elder" <?php echo selected_attr(request_value('guest_tag', $defaults), 'Elder'); ?>>Elder</option>
+    <option value="VIP and Elder" <?php echo selected_attr(request_value('guest_tag', $defaults), 'VIP and Elder'); ?>>VIP and Elder</option>
+    <option value="ToddlerWith Toddler" <?php echo selected_attr(request_value('guest_tag', $defaults), 'With Toddler'); ?>>With Toddler</option>
+    <option value="None" <?php echo selected_attr(request_value('guest_tag', $defaults), 'None'); ?>>None</option>
+  </select>
+</div>
 
                     <div class="field">
                       <label for="relation_label">Relation / group</label>
@@ -1162,15 +1267,40 @@ require_once $root . '/includes/header.php';
                     Keep this page focused on clean internal entry. Bulk uploads, dedupe, and invite sending should stay on the guest setup screen.
                   </div>
 
+                  <?php if ($guestTagColumn === null): ?>
+                    <div class="info-note" style="margin-top:10px; background:rgba(255,193,7,0.10); color:#6b5a1e;">
+                      Guest tag field is visible, but your <strong>guests</strong> table needs a <strong>guest_tag</strong>, <strong>tag</strong>, or <strong>tags</strong> column for it to save permanently.
+                    </div>
+                  <?php endif; ?>
+
                   <div class="page-actions-bottom">
-                    <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId . ($isEditMode ? '&guest_id=' . $guestId : ''))); ?>">Back</a>
-                    <button class="btn" type="submit" name="save_add_another" value="1">Save &amp; add another</button>
-                    <button class="btn btn-primary" type="submit" name="save_guest" value="1"><?php echo esc($pagePrimaryAction); ?></button>
-                  </div>
+  <?php if ($isEditMode): ?>
+    <button class="btn btn-danger-outline" type="submit" form="guest-delete-form">Delete guest</button>
+  <?php endif; ?>
+
+  <a class="btn" href="<?php echo esc(base_url('guests/index.php?project_id=' . $projectId . ($isEditMode ? '&guest_id=' . $guestId : ''))); ?>">Back</a>
+  <button class="btn" type="submit" name="save_add_another" value="1">Save &amp; add another</button>
+  <button class="btn btn-primary" type="submit" name="save_guest" value="1"><?php echo esc($pagePrimaryAction); ?></button>
+</div>
                 </section>
               </div>
             </div>
           </form>
+
+<?php if ($isEditMode): ?>
+  <form
+    id="guest-delete-form"
+    method="post"
+    action=""
+    style="display:none;"
+    onsubmit="return confirm('Are you sure you want to delete this guest from the guest list?\n\nThis action cannot be undone.');"
+  >
+    <input type="hidden" name="project_id" value="<?php echo esc((string)$projectId); ?>">
+    <input type="hidden" name="guest_id" value="<?php echo esc((string)$guestId); ?>">
+    <input type="hidden" name="delete_guest" value="1">
+  </form>
+<?php endif; ?>
+
         </div>
       </div>
     </div>
