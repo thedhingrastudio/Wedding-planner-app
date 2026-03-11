@@ -458,3 +458,4 @@ require_once $root . '/includes/header.php';
 </script>
 
 <?php require_once $root . '/includes/footer.php'; ?>
+
