@@ -155,16 +155,54 @@ $active = $active ?? 'overview';
 <?php endif; ?>
 
     <a class="project-nav-item project-nav-item--row <?php echo $active === 'travel' ? 'is-active' : ''; ?>"
-       href="#"
-       role="listitem"
-       <?php echo $active === 'travel' ? 'aria-current="page"' : ''; ?>>
-      <div class="project-nav-ico" aria-hidden="true">✈️</div>
-      <div class="project-nav-text">
-        <div class="project-nav-title">Travel and transport</div>
-        <div class="project-nav-sub">Plan airport pickups, drops and schedules based on guest travel details</div>
+   href="<?= h(base_url('travel/index.php?project_id=' . (int)$projectId)) ?>"
+   role="listitem"
+   <?php echo $active === 'travel' ? 'aria-current="page"' : ''; ?>>
+  <div class="project-nav-ico" aria-hidden="true">✈️</div>
+  <div class="project-nav-text">
+    <div class="project-nav-title">Travel and transport</div>
+    <div class="project-nav-sub">Plan airport pickups, drops and schedules based on guest travel details</div>
+  </div>
+  <div class="project-nav-arrow" aria-hidden="true"><?php echo $active === 'travel' ? '⌄' : '›'; ?></div>
+</a>
+
+<?php if ($active === 'travel'): ?>
+  <?php
+    $travelSteps = [
+      ['label' => 'Transport overview',   'done' => true],
+      ['label' => 'Guest manifest',       'done' => true],
+      ['label' => 'Arrivals (pickups)',   'done' => true],
+      ['label' => 'Departures (drops)',   'done' => false],
+      ['label' => 'Missing travel details','done' => true],
+      ['label' => 'Driver assignments',   'done' => true],
+      ['label' => 'Vehicle plan',         'done' => true],
+      ['label' => 'Trip status',          'done' => true],
+    ];
+  ?>
+  <div style="padding:10px 14px 14px 52px;">
+    <?php foreach ($travelSteps as $step): ?>
+      <div style="display:flex; align-items:center; gap:10px; padding:8px 0; font-size:13px; color:#1f1f1f;">
+        <span style="
+          width:20px;
+          height:20px;
+          border-radius:999px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          font-size:12px;
+          font-weight:700;
+          background:<?php echo $step['done'] ? '#1f8cff' : 'transparent'; ?>;
+          border:1.5px solid <?php echo $step['done'] ? '#1f8cff' : 'rgba(0,0,0,0.22)'; ?>;
+          color:#fff;
+          flex:0 0 20px;
+        ">
+          <?php echo $step['done'] ? '✓' : ''; ?>
+        </span>
+        <span><?php echo h($step['label']); ?></span>
       </div>
-      <div class="project-nav-arrow" aria-hidden="true">›</div>
-    </a>
+    <?php endforeach; ?>
+  </div>
+<?php endif; ?>
 
     <a class="project-nav-item project-nav-item--row <?php echo $active === 'hospitality' ? 'is-active' : ''; ?>"
        href="#"

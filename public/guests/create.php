@@ -245,6 +245,7 @@ if ($existingGuest) {
     'last_name'        => (string)($existingGuest['last_name'] ?? ''),
     'guest_tag'        => $guestTagColumn ? (string)($existingGuest[$guestTagColumn] ?? '') : '',
     'relation_label'   => (string)($existingGuest['relation_label'] ?? ''),
+    'family_group'     => (string)($existingGuest['family_group'] ?? ''),
     'city'             => (string)($existingGuest['city'] ?? ''),
     'seat_count'       => (string)($existingGuest['seat_count'] ?? '1'),
     'children_count'   => (string)($existingGuest['children_count'] ?? '0'),
@@ -343,8 +344,9 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
   $firstName         = trim((string)($_POST['first_name'] ?? ''));
   $lastName          = trim((string)($_POST['last_name'] ?? ''));
   $guestTag          = trim((string)($_POST['guest_tag'] ?? ''));
-  $relationLabel     = trim((string)($_POST['relation_label'] ?? ''));
-  $city              = trim((string)($_POST['city'] ?? ''));
+$familyGroup       = trim((string)($_POST['family_group'] ?? ''));
+$relationLabel     = trim((string)($_POST['relation_label'] ?? ''));
+$city              = trim((string)($_POST['city'] ?? ''));
   $seatCount         = max(1, (int)($_POST['seat_count'] ?? 1));
   $childrenCount     = max(0, (int)($_POST['children_count'] ?? 0));
   $plusOneAllowed    = (int)($_POST['plus_one_allowed'] ?? 0) === 1 ? 1 : 0;
@@ -425,6 +427,7 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
             first_name = :first_name,
             last_name = :last_name,
             relation_label = :relation_label,
+            family_group = :family_group,
             city = :city,
             seat_count = :seat_count,
             children_count = :children_count,
@@ -464,6 +467,7 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
           ':first_name'        => $firstName,
           ':last_name'         => $lastName !== '' ? $lastName : null,
           ':relation_label'    => $relationLabel !== '' ? $relationLabel : null,
+          ':family_group'     => $familyGroup !== '' ? $familyGroup : null,
           ':city'              => $city !== '' ? $city : null,
           ':seat_count'        => $seatCount,
           ':children_count'    => $childrenCount,
@@ -499,7 +503,7 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
       } else {
         $stmt = $pdo->prepare("
           INSERT INTO guests (
-            project_id, title, invited_by, first_name, last_name, relation_label, city,
+            project_id, title, invited_by, first_name, last_name, relation_label, family_group, city,
             seat_count, children_count, plus_one_allowed,
             phone, email, address,
             accessibility, special_notes, diet_preference, allergies,
@@ -511,7 +515,7 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
             id_document_note, stay_notes,
             created_by, created_at, updated_at
           ) VALUES (
-            :project_id, :title, :invited_by, :first_name, :last_name, :relation_label, :city,
+            :project_id, :title, :invited_by, :first_name, :last_name, :relation_label, :family_group, :city,
             :seat_count, :children_count, :plus_one_allowed,
             :phone, :email, :address,
             :accessibility, :special_notes, :diet_preference, :allergies,
@@ -532,6 +536,7 @@ $userId = (int)($_SESSION['user_id'] ?? 0);
           ':first_name'        => $firstName,
           ':last_name'         => $lastName !== '' ? $lastName : null,
           ':relation_label'    => $relationLabel !== '' ? $relationLabel : null,
+          ':family_group'      => $familyGroup !== '' ? $familyGroup : null,
           ':city'              => $city !== '' ? $city : null,
           ':seat_count'        => $seatCount,
           ':children_count'    => $childrenCount,
@@ -717,7 +722,7 @@ require_once $root . '/includes/header.php';
 }
 .form-grid-3{
   display:grid;
-  grid-template-columns:repeat(3, minmax(0,1fr));
+  grid-template-columns:repeat(3, minmax(160px,1fr));
   gap:14px;
   margin-top:16px;
 }
@@ -845,8 +850,22 @@ require_once $root . '/includes/header.php';
   justify-content:flex-end;
   gap:10px;
   margin-top:16px;
-  flex-wrap:wrap;
+  flex-wrap:
+  wrap;
 }
+
+.travel-detect-note{
+  margin-top:6px;
+  font-size:12px;
+  color:#6b7280;
+  line-height:1.4;
+}
+
+.travel-detect-note strong{
+  color:#1f1f1f;
+}
+
+
 </style>
 
 <div class="app-shell">
@@ -966,28 +985,44 @@ require_once $root . '/includes/header.php';
                       <input id="last_name" name="last_name" type="text" placeholder="Enter last name" value="<?php echo esc(request_value('last_name', $defaults)); ?>">
                     </div>
 
-                    <div class="field" style="grid-column:1 / -1;">
+                    <div class="field">
   <label for="guest_tag">Guest tag</label>
   <select id="guest_tag" name="guest_tag">
     <option value="">Select guest tag</option>
     <option value="VIP" <?php echo selected_attr(request_value('guest_tag', $defaults), 'VIP'); ?>>VIP</option>
     <option value="Elder" <?php echo selected_attr(request_value('guest_tag', $defaults), 'Elder'); ?>>Elder</option>
     <option value="VIP and Elder" <?php echo selected_attr(request_value('guest_tag', $defaults), 'VIP and Elder'); ?>>VIP and Elder</option>
-    <option value="ToddlerWith Toddler" <?php echo selected_attr(request_value('guest_tag', $defaults), 'With Toddler'); ?>>With Toddler</option>
+    <option value="With Toddler" <?php echo selected_attr(request_value('guest_tag', $defaults), 'With Toddler'); ?>>With Toddler</option>
     <option value="None" <?php echo selected_attr(request_value('guest_tag', $defaults), 'None'); ?>>None</option>
   </select>
 </div>
 
-                    <div class="field">
-                      <label for="relation_label">Relation / group</label>
-                      <input id="relation_label" name="relation_label" type="text" placeholder="e.g. Cousin, School friends, Sharma family" value="<?php echo esc(request_value('relation_label', $defaults)); ?>">
-                    </div>
+<div class="field">
+  <label for="family_group">Family group</label>
+  <input
+    id="family_group"
+    name="family_group"
+    type="text"
+    placeholder="e.g. AA, BB, Sharma family"
+    value="<?php echo esc(request_value('family_group', $defaults)); ?>"
+  >
+</div>
 
-                    <div class="field">
-                      <label for="city">City</label>
-                      <input id="city" name="city" type="text" placeholder="e.g. Delhi" value="<?php echo esc(request_value('city', $defaults)); ?>">
-                    </div>
-                  </div>
+<div class="field">
+  <label for="relation_label">Relation</label>
+  <input
+    id="relation_label"
+    name="relation_label"
+    type="text"
+    placeholder="e.g. Bride’s sister, Groom’s uncle"
+    value="<?php echo esc(request_value('relation_label', $defaults)); ?>"
+  >
+</div>
+
+<div class="field">
+  <label for="city">City</label>
+  <input id="city" name="city" type="text" placeholder="e.g. Delhi" value="<?php echo esc(request_value('city', $defaults)); ?>">
+</div>
 
                   <div class="form-grid-3">
                     <div class="field">
@@ -1087,9 +1122,18 @@ require_once $root . '/includes/header.php';
                     </div>
 
                     <div class="field">
-                      <label for="arrival_ref">Arrival flight / train no.</label>
-                      <input id="arrival_ref" name="arrival_ref" type="text" placeholder="e.g. AI-1234" value="<?php echo esc(request_value('arrival_ref', $defaults)); ?>">
-                    </div>
+  <label for="arrival_ref">Arrival flight / train no.</label>
+  <input
+    id="arrival_ref"
+    name="arrival_ref"
+    type="text"
+    placeholder="e.g. AI-1234"
+    value="<?php echo esc(request_value('arrival_ref', $defaults)); ?>"
+  >
+  <div class="travel-detect-note" id="arrival_ref_detect">
+    Detected travel type: <strong>Not sure</strong>
+  </div>
+</div>
 
                     <div class="field">
                       <label for="arrival_terminal">Arrival terminal / platform</label>
@@ -1107,9 +1151,18 @@ require_once $root . '/includes/header.php';
                     </div>
 
                     <div class="field">
-                      <label for="departure_ref">Departure flight / train no.</label>
-                      <input id="departure_ref" name="departure_ref" type="text" placeholder="e.g. UK-211" value="<?php echo esc(request_value('departure_ref', $defaults)); ?>">
-                    </div>
+  <label for="departure_ref">Departure flight / train no.</label>
+  <input
+    id="departure_ref"
+    name="departure_ref"
+    type="text"
+    placeholder="e.g. 12345"
+    value="<?php echo esc(request_value('departure_ref', $defaults)); ?>"
+  >
+  <div class="travel-detect-note" id="departure_ref_detect">
+    Detected travel type: <strong>Not sure</strong>
+  </div>
+</div>
 
                     <div class="field">
                       <label for="transport_notes">Pickup / drop remarks</label>
@@ -1306,5 +1359,49 @@ require_once $root . '/includes/header.php';
     </div>
   </section>
 </div>
+
+<script>
+(function () {
+  function detectTravelType(rawValue) {
+    const value = String(rawValue || '').trim().toUpperCase();
+
+    if (!value) return 'Not sure';
+
+    // Examples:
+    // AI-1234, UK211, 6E 5102, LH-760, BA289
+    const flightPattern = /^[A-Z0-9]{1,3}\s*[- ]?\s*\d{1,4}[A-Z]?$/;
+
+    // Examples:
+    // 12345, 123456
+    const trainPattern = /^\d{4,6}$/;
+
+    if (trainPattern.test(value)) return 'Train';
+    if (flightPattern.test(value) && /[A-Z]/.test(value)) return 'Flight';
+
+    return 'Not sure';
+  }
+
+  function bindTravelDetection(inputId, outputId) {
+    const input = document.getElementById(inputId);
+    const output = document.getElementById(outputId);
+    if (!input || !output) return;
+
+    function update() {
+      const detected = detectTravelType(input.value);
+      output.innerHTML = 'Detected travel type: <strong>' + detected + '</strong>';
+    }
+
+    input.addEventListener('input', update);
+    input.addEventListener('blur', update);
+    update();
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    bindTravelDetection('arrival_ref', 'arrival_ref_detect');
+    bindTravelDetection('departure_ref', 'departure_ref_detect');
+  });
+})();
+</script>
+
 
 <?php require_once $root . '/includes/footer.php'; ?>

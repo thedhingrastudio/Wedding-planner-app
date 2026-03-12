@@ -1517,11 +1517,7 @@ require_once $root . '/includes/header.php';
           </div>
         </div>
 
-        <div class="proj-top-actions">
-          <a class="btn btn-primary" href="<?php echo esc(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-          <a class="btn" href="<?php echo esc(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-          <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Project settings">⚙</a>
-        </div>
+        
       </div>
 
       <div class="project-shell">

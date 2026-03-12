@@ -94,9 +94,8 @@ function guest_pick(array $row, array $keys): string {
 
 function guest_group_value(array $row): string {
   return first_non_empty([
-    $row['group_name'] ?? '',
     $row['family_group'] ?? '',
-    $row['relation_label'] ?? '',
+    $row['group_name'] ?? '',
   ]);
 }
 
@@ -699,6 +698,7 @@ require_once $root . '/includes/header.php';
 .guest-table-card{
   padding:6px 12px 8px;
   border-radius:24px;
+  overflow:hidden;
 }
 .guest-table{
   width:100%;
@@ -762,7 +762,19 @@ require_once $root . '/includes/header.php';
 .guest-table tbody tr:last-child td{ border-bottom:none; }
 .guest-table-row{ cursor:pointer; }
 .guest-table-row:hover td{ background:rgba(0,0,0,0.02); }
-.guest-table-row.is-selected td{ background:rgba(75,0,31,0.06); }
+.guest-table-row.is-selected td{
+  background:rgba(75,0,31,0.045);
+}
+
+.guest-table-row.is-selected td:first-child{
+  border-top-left-radius:18px;
+  border-bottom-left-radius:18px;
+}
+
+.guest-table-row.is-selected td:last-child{
+  border-top-right-radius:18px;
+  border-bottom-right-radius:18px;
+}
 .guest-table-row:focus{ outline:none; }
 
 .guest-name{
@@ -1076,11 +1088,7 @@ require_once $root . '/includes/header.php';
           </div>
         </div>
 
-        <div class="proj-top-actions">
-          <a class="btn btn-primary" href="<?php echo esc(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-          <a class="btn" href="<?php echo esc(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-          <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Contract & scope">⚙</a>
-        </div>
+        
       </div>
 
       <div class="project-shell">
