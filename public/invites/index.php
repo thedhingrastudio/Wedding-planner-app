@@ -34,6 +34,8 @@ if (!in_array($filterRsvp, $allowedRsvp, true)) $filterRsvp = '';
 if (!in_array($filterTag, $allowedTags, true)) $filterTag = '';
 if (!in_array($filterRound, $allowedRounds, true)) $filterRound = '';
 
+$filterTag = '';
+
 function esc($v): string {
   return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 }
@@ -191,6 +193,56 @@ function guest_followup_round(array $row): string {
 
   return guest_has_contact($row) ? '1' : 'none';
 }
+
+
+function guest_followup_status(array $row): string {
+  $round = guest_followup_round($row);
+
+  if ($round === 'none') {
+    $intro = normalize_key($row['intro_message_status'] ?? 'pending');
+    return match ($intro) {
+      'completed'   => 'completed',
+      'in_progress' => 'in_progress',
+      default       => 'pending',
+    };
+  }
+
+  $callKey = 'round' . $round . '_call_status';
+  $msgKey  = 'round' . $round . '_message_status';
+
+  $call = normalize_key($row[$callKey] ?? 'pending');
+  $msg  = normalize_key($row[$msgKey] ?? 'pending');
+
+  if ($call === 'completed' && $msg === 'completed') return 'completed';
+  if ($call === 'in_progress' || $msg === 'in_progress') return 'in_progress';
+  if ($call === 'completed' || $msg === 'completed') return 'in_progress';
+
+  return 'pending';
+}
+
+function guest_followup_status_label(string $status): string {
+  return match ($status) {
+    'completed'   => 'Done',
+    'in_progress' => 'In progress',
+    default       => 'Pending',
+  };
+}
+
+function guest_followup_chip_class(string $status): string {
+  return match ($status) {
+    'completed'   => 'ok',
+    'in_progress' => 'neutral',
+    default       => 'pending',
+  };
+}
+
+function guest_followup_compact_label(array $row): string {
+  $round = guest_followup_round($row);
+  if ($round === 'none') return 'No follow-up';
+
+  return 'R' . $round . ' · ' . guest_followup_status_label(guest_followup_status($row));
+}
+
 
 function guest_followup_round_label(string $round): string {
   return match ($round) {
@@ -728,7 +780,7 @@ try {
 }
 
 $basePageUrl = invite_page_url($projectId);
-$hasActiveFilters = $searchQ !== '' || $filterSide !== '' || $filterRsvp !== '' || $filterTag !== '' || $filterRound !== '';
+$hasActiveFilters = $searchQ !== '' || $filterSide !== '' || $filterRsvp !== '' || $filterRound !== '';
 
 $pageTitle = $projectTitle . ' — Invite & RSVP — Vidhaan';
 require_once $root . '/includes/header.php';
@@ -916,11 +968,13 @@ require_once $root . '/includes/header.php';
   border-radius:26px;
   overflow:hidden;
 }
+
 .invite-table{
   width:100%;
   border-collapse:separate;
   border-spacing:0;
 }
+
 .invite-table thead th{
   text-align:left;
   padding:14px 14px 14px;
@@ -930,16 +984,25 @@ require_once $root . '/includes/header.php';
   border-bottom:1px solid rgba(0,0,0,0.06);
   vertical-align:top;
 }
+
 .invite-table thead th.invite-col-name{
-  width:205px;
-  min-width:205px;
+  width:170px;
+  min-width:170px;
   padding-top:24px;
 }
+
+.invite-col-headcount{
+  width:68px;
+  min-width:68px;
+  padding-top:24px;
+}
+
 .invite-th-wrap{
   display:flex;
   flex-direction:column;
   gap:7px;
 }
+
 .invite-th-top{
   display:flex;
   align-items:center;
@@ -948,13 +1011,15 @@ require_once $root . '/includes/header.php';
   font-size:12px;
   font-weight:700;
 }
+
 .invite-th-top .chev{
   font-size:11px;
   color:#b0b0b6;
 }
+
 .invite-th-filter{
   width:100%;
-  min-width:74px;
+  min-width:72px;
   min-height:34px;
   border-radius:999px;
   border:1px solid rgba(0,0,0,0.06);
@@ -964,36 +1029,46 @@ require_once $root . '/includes/header.php';
   padding:0 12px;
   outline:none;
 }
+
 .invite-th-filter:focus{
   border-color:rgba(0,0,0,0.14);
-}
-.invite-th-filter:disabled{
-  opacity:1;
-  color:#b7b7bd;
-  background:#fafafa;
 }
 
 .invite-table tbody td{
   text-align:left;
-  padding:16px 16px;
+  padding:14px 12px;
   border-bottom:1px solid rgba(0,0,0,0.05);
   vertical-align:middle;
   font-size:14px;
   color:#1f1f22;
   transition:background 160ms ease;
 }
-.invite-table tbody tr:last-child td{ border-bottom:none; }
-.invite-table-row{ cursor:pointer; }
-.invite-table-row:hover td{ background:rgba(0,0,0,0.02); }
-.invite-table-row:focus{ outline:none; }
+
+.invite-table tbody tr:last-child td{
+  border-bottom:none;
+}
+
+.invite-table-row{
+  cursor:pointer;
+}
+
+.invite-table-row:hover td{
+  background:rgba(0,0,0,0.02);
+}
+
+.invite-table-row:focus{
+  outline:none;
+}
 
 .invite-table-row.is-selected td{
   background:rgba(75,0,31,0.045);
 }
+
 .invite-table-row.is-selected td:first-child{
   border-top-left-radius:18px;
   border-bottom-left-radius:18px;
 }
+
 .invite-table-row.is-selected td:last-child{
   border-top-right-radius:18px;
   border-bottom-right-radius:18px;
@@ -1002,51 +1077,83 @@ require_once $root . '/includes/header.php';
 .invite-name{
   font-weight:500;
   color:#1d1d1f;
-  line-height:1.4;
-  min-width:205px;
-  width:205px;
+  line-height:1.3;
+  font-size:13px;
+  width:170px;
+  min-width:170px;
+  max-width:170px;
   white-space:normal;
-  overflow-wrap:break-word;
+  overflow-wrap:anywhere;
+  word-break:break-word;
 }
+
 .invite-side-text{
   color:#4f4f55;
   font-size:13px;
   line-height:1.35;
 }
 
+/* Side */
+.invite-table thead th:nth-child(2),
+.invite-table tbody td:nth-child(2){
+  width:110px;
+  min-width:110px;
+}
+
+/* RSVP */
+.invite-table thead th:nth-child(3),
+.invite-table tbody td:nth-child(3){
+  width:115px;
+  min-width:115px;
+}
+
+/* Follow-up */
+.invite-table thead th:nth-child(4),
+.invite-table tbody td:nth-child(4){
+  width:125px;
+  min-width:125px;
+}
+
+/* Headcount */
+.invite-table thead th:nth-child(5),
+.invite-table tbody td:nth-child(5){
+  width:68px;
+  min-width:68px;
+  padding-left:8px;
+  padding-right:8px;
+}
 .table-chip{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  gap:8px;
-  min-height:30px;
-  padding:0 14px;
+  gap:6px;
+  min-height:28px;
+  padding:0 10px;
   border-radius:999px;
-  font-size:12px;
+  font-size:11px;
   font-weight:500;
   white-space:nowrap;
   border:none;
 }
+
 .table-chip.ok{
   background:#dff1cf;
   color:#54733e;
 }
+
 .table-chip.warn{
   background:#f4cccc;
   color:#875050;
 }
+
 .table-chip.pending{
   background:#efcccc;
   color:#8a5b5b;
 }
+
 .table-chip.neutral{
   background:#efefef;
   color:#7b7b82;
-}
-.tag-stack{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
 }
 .empty-table{
   padding:18px;
@@ -1503,130 +1610,99 @@ require_once $root . '/includes/header.php';
                   <?php if ($hasDisplayGuests): ?>
                     <table class="invite-table">
                       <thead>
-                        <tr>
-                          <th class="invite-col-name">Guest name</th>
+  <tr>
+    <th class="invite-col-name">Guest name</th>
 
-                          <th>
-                            <div class="invite-th-wrap">
-                              <div class="invite-th-top">Side <span class="chev">⌄</span></div>
-                              <select class="invite-th-filter" name="side" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="bride" <?php echo $filterSide === 'bride' ? 'selected' : ''; ?>>Bride’s side</option>
-                                <option value="groom" <?php echo $filterSide === 'groom' ? 'selected' : ''; ?>>Groom’s side</option>
-                                <option value="both" <?php echo $filterSide === 'both' ? 'selected' : ''; ?>>Both families</option>
-                              </select>
-                            </div>
-                          </th>
+    <th>
+      <div class="invite-th-wrap">
+        <div class="invite-th-top">Side <span class="chev">⌄</span></div>
+        <select class="invite-th-filter" name="side" onchange="this.form.submit()">
+          <option value="">All</option>
+          <option value="bride" <?php echo $filterSide === 'bride' ? 'selected' : ''; ?>>Bride’s side</option>
+          <option value="groom" <?php echo $filterSide === 'groom' ? 'selected' : ''; ?>>Groom’s side</option>
+          <option value="both" <?php echo $filterSide === 'both' ? 'selected' : ''; ?>>Both families</option>
+        </select>
+      </div>
+    </th>
 
-                          <th>
-                            <div class="invite-th-wrap">
-                              <div class="invite-th-top">RSVP <span class="chev">⌄</span></div>
-                              <select class="invite-th-filter" name="rsvp" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="attending" <?php echo $filterRsvp === 'attending' ? 'selected' : ''; ?>>Attending</option>
-                                <option value="not_attending" <?php echo $filterRsvp === 'not_attending' ? 'selected' : ''; ?>>Not attending</option>
-                                <option value="pending" <?php echo $filterRsvp === 'pending' ? 'selected' : ''; ?>>Pending</option>
-                              </select>
-                            </div>
-                          </th>
+    <th>
+      <div class="invite-th-wrap">
+        <div class="invite-th-top">RSVP <span class="chev">⌄</span></div>
+        <select class="invite-th-filter" name="rsvp" onchange="this.form.submit()">
+          <option value="">All</option>
+          <option value="attending" <?php echo $filterRsvp === 'attending' ? 'selected' : ''; ?>>Attending</option>
+          <option value="not_attending" <?php echo $filterRsvp === 'not_attending' ? 'selected' : ''; ?>>Not attending</option>
+          <option value="pending" <?php echo $filterRsvp === 'pending' ? 'selected' : ''; ?>>Pending</option>
+        </select>
+      </div>
+    </th>
 
-                          <th>
-                            <div class="invite-th-wrap">
-                              <div class="invite-th-top">Headcount <span class="chev">⌄</span></div>
-                              <select class="invite-th-filter" disabled>
-                                <option value=""> </option>
-                              </select>
-                            </div>
-                          </th>
+    <th>
+      <div class="invite-th-wrap">
+        <div class="invite-th-top">Follow-up <span class="chev">⌄</span></div>
+        <select class="invite-th-filter" name="round" onchange="this.form.submit()">
+          <option value="">All</option>
+          <option value="1" <?php echo $filterRound === '1' ? 'selected' : ''; ?>>Round 1</option>
+          <option value="2" <?php echo $filterRound === '2' ? 'selected' : ''; ?>>Round 2</option>
+          <option value="3" <?php echo $filterRound === '3' ? 'selected' : ''; ?>>Round 3</option>
+          <option value="none" <?php echo $filterRound === 'none' ? 'selected' : ''; ?>>No follow-up</option>
+        </select>
+      </div>
+    </th>
 
-                          <th>
-                            <div class="invite-th-wrap">
-                              <div class="invite-th-top">Tag <span class="chev">⌄</span></div>
-                              <select class="invite-th-filter" name="tag" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="vip" <?php echo $filterTag === 'vip' ? 'selected' : ''; ?>>VIP</option>
-                                <option value="elder" <?php echo $filterTag === 'elder' ? 'selected' : ''; ?>>Elder</option>
-                                <option value="none" <?php echo $filterTag === 'none' ? 'selected' : ''; ?>>None</option>
-                              </select>
-                            </div>
-                          </th>
-
-                          <th>
-                            <div class="invite-th-wrap">
-                              <div class="invite-th-top">Follow-up round <span class="chev">⌄</span></div>
-                              <select class="invite-th-filter" name="round" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="1" <?php echo $filterRound === '1' ? 'selected' : ''; ?>>Round 1</option>
-                                <option value="2" <?php echo $filterRound === '2' ? 'selected' : ''; ?>>Round 2</option>
-                                <option value="3" <?php echo $filterRound === '3' ? 'selected' : ''; ?>>Round 3</option>
-                                <option value="none" <?php echo $filterRound === 'none' ? 'selected' : ''; ?>>No follow-up</option>
-                              </select>
-                            </div>
-                          </th>
-                        </tr>
-                      </thead>
+    <th class="invite-col-headcount">
+      <div class="invite-th-top">Headcount</div>
+    </th>
+  </tr>
+</thead>
 
                       <tbody>
                         <?php foreach ($displayGuestRows as $row): ?>
                           <?php
-                            $rowId = (int)($row['id'] ?? 0);
-                            $fullName = guest_full_name($row);
-                            $rsvpStatus = guest_rsvp_status($row);
-                            $rsvpLabel = guest_rsvp_label($rsvpStatus);
-                            $rsvpClass = guest_rsvp_chip_class($rsvpStatus);
-                            $tags = guest_tags_from_row($row);
-                            $round = guest_followup_round($row);
-                            $rowUrl = invite_page_url(
-                              $projectId,
-                              $searchQ,
-                              $rowId,
-                              $filterSide,
-                              $filterRsvp,
-                              $filterTag,
-                              $filterRound
-                            );
-                            $isSelected = $selectedGuestId > 0 && $rowId === $selectedGuestId;
-                          ?>
-                          <tr
-                            class="invite-table-row <?php echo $isSelected ? 'is-selected' : ''; ?>"
-                            data-guest-row-url="<?php echo esc($rowUrl); ?>"
-                            tabindex="0"
-                            role="button"
-                            aria-label="View details for <?php echo esc($fullName); ?>"
-                          >
-                            <td class="invite-name"><?php echo esc($fullName); ?></td>
-                            <td class="invite-side-text"><?php echo esc(side_label((string)($row['invited_by'] ?? ''))); ?></td>
-                            <td><span class="table-chip <?php echo esc($rsvpClass); ?>"><?php echo esc($rsvpLabel); ?></span></td>
-                            <td><span class="table-chip neutral"><?php echo esc(guest_headcount_display($row)); ?></span></td>
-                            <td>
-                              <?php if ($tags): ?>
-                                <div class="tag-stack">
-                                  <?php
-                                    $visibleTags = array_values(array_filter(
-                                      $tags,
-                                      static fn(string $tagItem): bool => in_array($tagItem, ['VIP', 'Elder'], true)
-                                    ));
-                                  ?>
-                                  <?php if ($visibleTags): ?>
-                                    <?php foreach ($visibleTags as $tagItem): ?>
-                                      <span class="table-chip ok"><?php echo esc($tagItem); ?></span>
-                                    <?php endforeach; ?>
-                                  <?php else: ?>
-                                    <span class="table-chip neutral">-</span>
-                                  <?php endif; ?>
-                                </div>
-                              <?php else: ?>
-                                <span class="table-chip neutral">-</span>
-                              <?php endif; ?>
-                            </td>
-                            <td>
-                              <?php if ($round !== 'none'): ?>
-                                <span class="table-chip neutral"><?php echo esc(guest_followup_round_label($round)); ?></span>
-                              <?php else: ?>
-                                <span class="table-chip neutral">-</span>
-                              <?php endif; ?>
-                            </td>
-                          </tr>
+  $rowId = (int)($row['id'] ?? 0);
+  $fullName = guest_full_name($row);
+  $rsvpStatus = guest_rsvp_status($row);
+  $rsvpLabel = guest_rsvp_label($rsvpStatus);
+  $rsvpClass = guest_rsvp_chip_class($rsvpStatus);
+
+  $followupStatus = guest_followup_status($row);
+  $followupClass = guest_followup_chip_class($followupStatus);
+  $followupLabel = guest_followup_compact_label($row);
+
+  $rowUrl = invite_page_url(
+    $projectId,
+    $searchQ,
+    $rowId,
+    $filterSide,
+    $filterRsvp,
+    '',
+    $filterRound
+  );
+  $isSelected = $selectedGuestId > 0 && $rowId === $selectedGuestId;
+?>
+<tr
+  class="invite-table-row <?php echo $isSelected ? 'is-selected' : ''; ?>"
+  data-guest-row-url="<?php echo esc($rowUrl); ?>"
+  tabindex="0"
+  role="button"
+  aria-label="View details for <?php echo esc($fullName); ?>"
+>
+  <td class="invite-name"><?php echo esc($fullName); ?></td>
+  <td class="invite-side-text"><?php echo esc(side_label((string)($row['invited_by'] ?? ''))); ?></td>
+  <td>
+    <span class="table-chip <?php echo esc($rsvpClass); ?>">
+      <?php echo esc($rsvpLabel); ?>
+    </span>
+  </td>
+  <td>
+    <span class="table-chip <?php echo esc($followupClass); ?>">
+      <?php echo esc($followupLabel); ?>
+    </span>
+  </td>
+  <td>
+    <span class="table-chip neutral"><?php echo esc(guest_headcount_display($row)); ?></span>
+  </td>
+</tr>
                         <?php endforeach; ?>
                       </tbody>
                     </table>
@@ -1649,7 +1725,7 @@ require_once $root . '/includes/header.php';
                 <p class="health-sub">What needs cleaning before invites go out.</p>
 
                 <div class="health-wrap">
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>RSVP overview</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
@@ -1661,7 +1737,7 @@ require_once $root . '/includes/header.php';
                     </div>
                   </details>
 
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>Response breakdown</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
@@ -1672,7 +1748,7 @@ require_once $root . '/includes/header.php';
                     </div>
                   </details>
 
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>Headcount</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
@@ -1685,7 +1761,7 @@ require_once $root . '/includes/header.php';
                     </div>
                   </details>
 
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>Missing details</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
@@ -1698,7 +1774,7 @@ require_once $root . '/includes/header.php';
                     </div>
                   </details>
 
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>Follow-up queue</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
@@ -1711,7 +1787,7 @@ require_once $root . '/includes/header.php';
                     </div>
                   </details>
 
-                  <details class="health-group" open>
+                  <details class="health-group">
                     <summary>
                       <span>Events’ headcount</span>
                       <span class="health-chevron" aria-hidden="true">⌄</span>
