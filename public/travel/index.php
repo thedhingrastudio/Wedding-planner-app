@@ -28,6 +28,8 @@ $allowedBuckets = ['arrivals', 'departures', 'unassigned', 'care', 'drivers'];
 $allowedSides   = ['bride', 'groom', 'both'];
 $allowedModes   = ['flight', 'train', 'not_sure'];
 
+$selectedGuestId = (int)($_GET['guest_id'] ?? 0);
+
 if (!in_array($bucket, $allowedBuckets, true)) $bucket = 'arrivals';
 if (!in_array($filterSide, $allowedSides, true)) $filterSide = '';
 if (!in_array($filterMode, $allowedModes, true)) $filterMode = '';
@@ -352,7 +354,8 @@ function travel_page_url(
   string $side = '',
   string $mode = '',
   string $terminal = '',
-  string $driver = ''
+  string $driver = '',
+  int $guestId = 0
 ): string {
   $params = ['project_id' => $projectId, 'bucket' => $bucket];
   if ($searchQ !== '') $params['q'] = $searchQ;
@@ -360,6 +363,7 @@ function travel_page_url(
   if ($mode !== '') $params['mode'] = $mode;
   if ($terminal !== '') $params['terminal'] = $terminal;
   if ($driver !== '') $params['driver'] = $driver;
+  if ($guestId > 0) $params['guest_id'] = $guestId;
 
   return base_url('travel/index.php?' . http_build_query($params));
 }
@@ -459,6 +463,16 @@ if (table_exists_local($pdo, 'guests')) {
   $st->execute([':pid' => $projectId]);
   $guestRows = $st->fetchAll() ?: [];
 }
+
+$selectedGuest = null;
+
+foreach ($guestRows as $row) {
+  if ((int)($row['id'] ?? 0) === $selectedGuestId) {
+    $selectedGuest = $row;
+    break;
+  }
+}
+
 
 $allTripRows = build_trip_rows($guestRows);
 
@@ -590,6 +604,42 @@ foreach ($allTripRows as $trip) {
   if (in_array('Toddler', $trip['tags'], true)) $specialCounts['Child seat']++;
 }
 
+
+$selectedGuestName = '';
+$selectedGuestSide = '';
+$selectedGuestRelation = '';
+$selectedGuestFamilyGroup = '';
+$selectedPickupRequired = 0;
+$selectedDropRequired = 0;
+$selectedArrivalDate = '';
+$selectedArrivalTime = '';
+$selectedArrivalRef = '';
+$selectedArrivalTerminal = '';
+$selectedDepartureDate = '';
+$selectedDepartureTime = '';
+$selectedDepartureRef = '';
+$selectedDepartureTerminal = '';
+$selectedTransportNotes = '';
+
+if ($selectedGuest) {
+  $selectedGuestName = guest_full_name($selectedGuest);
+  $selectedGuestSide = side_label((string)($selectedGuest['invited_by'] ?? ''));
+  $selectedGuestRelation = trim((string)($selectedGuest['relation_label'] ?? ''));
+  $selectedGuestFamilyGroup = trim((string)($selectedGuest['family_group'] ?? ''));
+  $selectedPickupRequired = (int)($selectedGuest['pickup_required'] ?? 0);
+  $selectedDropRequired = (int)($selectedGuest['drop_required'] ?? 0);
+  $selectedArrivalDate = trim((string)($selectedGuest['arrival_date'] ?? ''));
+  $selectedArrivalTime = trim((string)($selectedGuest['arrival_time'] ?? ''));
+  $selectedArrivalRef = trim((string)($selectedGuest['arrival_ref'] ?? ''));
+  $selectedArrivalTerminal = trim((string)($selectedGuest['arrival_terminal'] ?? ''));
+  $selectedDepartureDate = trim((string)($selectedGuest['departure_date'] ?? ''));
+  $selectedDepartureTime = trim((string)($selectedGuest['departure_time'] ?? ''));
+  $selectedDepartureRef = trim((string)($selectedGuest['departure_ref'] ?? ''));
+  $selectedDepartureTerminal = trim((string)($selectedGuest['departure_terminal'] ?? ''));
+  $selectedTransportNotes = trim((string)($selectedGuest['transport_notes'] ?? ''));
+}
+
+
 arsort($pickupLocationCounts);
 
 $pageTitle = $projectTitle . ' — Travel and transport — Vidhaan';
@@ -653,7 +703,12 @@ require_once $root . '/includes/header.php';
 }
 
 .travel-main{ min-width:0; }
-.travel-side{ min-width:0; }
+.travel-side{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
 
 .travel-stat-row{
   display:grid;
@@ -748,7 +803,8 @@ require_once $root . '/includes/header.php';
 .travel-table-card{
   padding:8px 14px 10px;
   border-radius:26px;
-  overflow:hidden;
+  overflow-x:auto;
+  overflow-y:hidden;
 }
 .travel-table{
   width:100%;
@@ -764,10 +820,16 @@ require_once $root . '/includes/header.php';
   border-bottom:1px solid rgba(0,0,0,0.06);
   vertical-align:top;
 }
-.travel-table thead th.travel-col-name{
-  width:180px;
-  min-width:180px;
+.travel-table tbody td{
+  text-align:left;
+  padding:12px 10px;
+  border-bottom:1px solid rgba(0,0,0,0.05);
+  vertical-align:middle;
+  font-size:13px;
+  color:#1f1f22;
 }
+.travel-table tbody tr:last-child td{ border-bottom:none; }
+
 .travel-th-wrap{
   display:flex;
   flex-direction:column;
@@ -797,49 +859,44 @@ require_once $root . '/includes/header.php';
   padding:0 12px;
   outline:none;
 }
-.travel-table tbody td{
-  text-align:left;
-  padding:14px 12px;
-  border-bottom:1px solid rgba(0,0,0,0.05);
-  vertical-align:middle;
-  font-size:14px;
-  color:#1f1f22;
-}
-.travel-table tbody tr:last-child td{ border-bottom:none; }
 
+.travel-table thead th.travel-col-name{
+  width:150px;
+  min-width:150px;
+}
 .travel-table thead th:nth-child(2),
 .travel-table tbody td:nth-child(2){
-  width:110px;
-  min-width:110px;
-}
-.travel-table thead th:nth-child(3),
-.travel-table tbody td:nth-child(3){
-  width:110px;
-  min-width:110px;
-}
-.travel-table thead th:nth-child(4),
-.travel-table tbody td:nth-child(4){
   width:95px;
   min-width:95px;
 }
+.travel-table thead th:nth-child(3),
+.travel-table tbody td:nth-child(3){
+  width:95px;
+  min-width:95px;
+}
+.travel-table thead th:nth-child(4),
+.travel-table tbody td:nth-child(4){
+  width:86px;
+  min-width:86px;
+}
 .travel-table thead th:nth-child(5),
 .travel-table tbody td:nth-child(5){
-  width:90px;
-  min-width:90px;
+  width:76px;
+  min-width:76px;
 }
 .travel-table thead th:nth-child(6),
 .travel-table tbody td:nth-child(6){
-  width:130px;
-  min-width:130px;
+  width:110px;
+  min-width:110px;
 }
 
 .travel-name{
   font-weight:500;
   color:#1d1d1f;
-  line-height:1.35;
-  width:180px;
-  min-width:180px;
-  max-width:180px;
+  line-height:1.3;
+  width:150px;
+  min-width:150px;
+  max-width:150px;
   white-space:normal;
   overflow-wrap:anywhere;
 }
@@ -847,6 +904,24 @@ require_once $root . '/includes/header.php';
   color:#4f4f55;
   font-size:13px;
   line-height:1.35;
+}
+
+.travel-table-row{
+  cursor:pointer;
+}
+.travel-table-row:hover td{
+  background:rgba(0,0,0,0.02);
+}
+.travel-table-row.is-selected td{
+  background:rgba(75,0,31,0.045);
+}
+.travel-table-row.is-selected td:first-child{
+  border-top-left-radius:18px;
+  border-bottom-left-radius:18px;
+}
+.travel-table-row.is-selected td:last-child{
+  border-top-right-radius:18px;
+  border-bottom-right-radius:18px;
 }
 
 .table-chip{
@@ -904,7 +979,8 @@ require_once $root . '/includes/header.php';
   line-height:1.55;
 }
 
-.overview-card{
+.overview-card,
+.travel-detail-card{
   padding:18px;
   border-radius:24px;
 }
@@ -976,13 +1052,6 @@ require_once $root . '/includes/header.php';
   font-weight:700;
 }
 
-@media (max-width:980px){
-  .travel-head{
-    flex-direction:column;
-    align-items:flex-start;
-  }
-}
-
 .overview-guest-item{
   padding:8px 0;
   border-top:1px solid rgba(0,0,0,0.05);
@@ -1014,7 +1083,172 @@ require_once $root . '/includes/header.php';
   color:#7b7b82;
 }
 
+.travel-detail-empty{
+  display:grid;
+  place-items:center;
+  min-height:240px;
+  text-align:center;
+  color:#76767c;
+  padding:16px;
+}
+.travel-detail-empty-title{
+  font-size:15px;
+  font-weight:700;
+  color:#2a2a2d;
+}
+.travel-detail-empty-sub{
+  margin-top:8px;
+  font-size:12px;
+  line-height:1.55;
+  color:#7a7a80;
+  max-width:240px;
+}
 
+.travel-detail-topline{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:14px;
+}
+.travel-detail-label{
+  font-size:14px;
+  font-weight:800;
+  color:#4d4d53;
+}
+.travel-close{
+  width:32px;
+  height:32px;
+  min-width:32px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,0.08);
+  background:#fff;
+  color:#2d2d2d;
+  text-decoration:none;
+  font-size:16px;
+}
+.travel-close:hover{ background:#f7f7f8; }
+
+.travel-detail-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.travel-detail-title{
+  margin:0;
+  font-size:18px;
+  line-height:1.2;
+  font-weight:800;
+  color:#1d1d1f;
+}
+.travel-detail-sub{
+  margin-top:6px;
+  color:#6f6f73;
+  font-size:12px;
+}
+
+.travel-detail-divider{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:14px 0;
+  color:#aaa9b1;
+}
+.travel-detail-divider::before,
+.travel-detail-divider::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:rgba(0,0,0,0.08);
+}
+.travel-detail-divider span{
+  font-size:12px;
+  line-height:1;
+}
+
+.travel-detail-top-grid{
+  display:grid;
+  grid-template-columns:1fr 110px;
+  gap:10px;
+}
+.travel-mini-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.travel-field-label{
+  font-size:11px;
+  color:#8b8b91;
+  margin-bottom:6px;
+}
+.travel-input,
+.travel-select{
+  width:100%;
+  min-height:42px;
+  border-radius:14px;
+  border:1px solid rgba(0,0,0,0.08);
+  background:#f7f7f8;
+  color:#232327;
+  font-size:13px;
+  line-height:1.35;
+  padding:10px 12px;
+  box-sizing:border-box;
+  outline:none;
+}
+.travel-select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #a2a2a8 50%),
+    linear-gradient(135deg, #a2a2a8 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 13px) calc(50% - 2px);
+  background-size:5px 5px, 5px 5px;
+  background-repeat:no-repeat;
+  padding-right:34px;
+}
+.travel-input:focus,
+.travel-select:focus{
+  border-color:rgba(0,0,0,0.16);
+  background:#fff;
+}
+.travel-section{
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid rgba(0,0,0,0.06);
+}
+.travel-section-title{
+  font-size:16px;
+  font-weight:800;
+  color:#1f1f22;
+  margin-bottom:10px;
+}
+.travel-detail-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:16px;
+  flex-wrap:wrap;
+}
+
+@media (max-width:980px){
+  .travel-head{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
+@media (max-width:560px){
+  .travel-detail-top-grid,
+  .travel-mini-grid{
+    grid-template-columns:1fr;
+  }
+}
 </style>
 
 <div class="app-shell">
@@ -1190,17 +1424,37 @@ require_once $root . '/includes/header.php';
                       </thead>
 
                       <tbody>
-                        <?php foreach ($displayRows as $trip): ?>
-                          <tr>
-                            <td class="travel-name"><?php echo esc($trip['guest_name']); ?></td>
-                            <td class="travel-side-text"><?php echo esc(side_label($trip['side'])); ?></td>
-                            <td><span class="table-chip <?php echo esc($trip['mode_class']); ?>"><?php echo esc($trip['mode_label']); ?></span></td>
-                            <td><span class="table-chip neutral"><?php echo esc($trip['date_label']); ?></span></td>
-                            <td><span class="table-chip neutral"><?php echo esc($trip['terminal']); ?></span></td>
-                            <td><span class="table-chip <?php echo esc($trip['driver_class']); ?>"><?php echo esc($trip['driver']); ?></span></td>
-                          </tr>
-                        <?php endforeach; ?>
-                      </tbody>
+  <?php foreach ($displayRows as $trip): ?>
+    <?php
+      $rowUrl = travel_page_url(
+        $projectId,
+        $bucket,
+        $searchQ,
+        $filterSide,
+        $filterMode,
+        $filterTerminal,
+        $filterDriver,
+        (int)$trip['guest_id']
+      );
+
+      $isSelected = $selectedGuestId > 0 && (int)$trip['guest_id'] === $selectedGuestId;
+    ?>
+    <tr
+      class="travel-table-row <?php echo $isSelected ? 'is-selected' : ''; ?>"
+      data-travel-row-url="<?php echo esc($rowUrl); ?>"
+      tabindex="0"
+      role="button"
+      aria-label="View travel details for <?php echo esc($trip['guest_name']); ?>"
+    >
+      <td class="travel-name"><?php echo esc($trip['guest_name']); ?></td>
+      <td class="travel-side-text"><?php echo esc(side_label($trip['side'])); ?></td>
+      <td><span class="table-chip <?php echo esc($trip['mode_class']); ?>"><?php echo esc($trip['mode_label']); ?></span></td>
+      <td><span class="table-chip neutral"><?php echo esc($trip['date_label']); ?></span></td>
+      <td><span class="table-chip neutral"><?php echo esc($trip['terminal']); ?></span></td>
+      <td><span class="table-chip <?php echo esc($trip['driver_class']); ?>"><?php echo esc($trip['driver']); ?></span></td>
+    </tr>
+  <?php endforeach; ?>
+</tbody>
                     </table>
                   <?php else: ?>
                     <div class="empty-table">
@@ -1211,118 +1465,294 @@ require_once $root . '/includes/header.php';
               </form>
             </div>
 
-            <aside class="travel-side">
-              <section class="card proj-card overview-card">
-                <h3 class="overview-title">Travel and transport overview</h3>
-                <p class="overview-sub">What needs cleaning before pickups and drops go out.</p>
+           <aside class="travel-side">
+  <section class="card proj-card overview-card">
+    <h3 class="overview-title">Travel and transport overview</h3>
+    <p class="overview-sub">What needs cleaning before pickups and drops go out.</p>
 
-                <div class="overview-wrap">
-                  <details class="overview-group" open>
-                    <summary>
-                      <span>At risk</span>
-                      <span class="overview-chevron" aria-hidden="true">⌄</span>
-                    </summary>
-                    <div class="overview-list">
-                      <div class="overview-row"><div class="label">Unassigned trips</div><div class="value"><?php echo esc((string)$unassignedCount); ?></div></div>
-                      <div class="overview-row"><div class="label">Missing terminal / platform</div><div class="value"><?php echo esc((string)$missingTerminalCount); ?></div></div>
-                      <div class="overview-row"><div class="label">Late night arrivals</div><div class="value"><?php echo esc((string)$lateNightArrivalsCount); ?></div></div>
-                    </div>
-                  </details>
+    <div class="overview-wrap">
+      <details class="overview-group" open>
+        <summary>
+          <span>At risk</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <div class="overview-row"><div class="label">Unassigned trips</div><div class="value"><?php echo esc((string)$unassignedCount); ?></div></div>
+          <div class="overview-row"><div class="label">Missing terminal / platform</div><div class="value"><?php echo esc((string)$missingTerminalCount); ?></div></div>
+          <div class="overview-row"><div class="label">Late night arrivals</div><div class="value"><?php echo esc((string)$lateNightArrivalsCount); ?></div></div>
+        </div>
+      </details>
 
+      <details class="overview-group">
+        <summary>
+          <span>Trip status</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <div class="overview-row"><div class="label">Unassigned driver</div><div class="value"><?php echo esc((string)$unassignedCount); ?></div></div>
+          <div class="overview-row"><div class="label">Assigned</div><div class="value"><?php echo esc((string)$assignedTripCount); ?></div></div>
+          <div class="overview-row"><div class="label">In progress</div><div class="value">0</div></div>
+          <div class="overview-row"><div class="label">Completed</div><div class="value">0</div></div>
+        </div>
+      </details>
 
+      <details class="overview-group">
+        <summary>
+          <span>Pick up locations</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <?php if ($pickupLocationCounts): ?>
+            <?php foreach (array_slice($pickupLocationCounts, 0, 5, true) as $location => $count): ?>
+              <div class="overview-row"><div class="label"><?php echo esc($location); ?></div><div class="value"><?php echo esc((string)$count); ?></div></div>
+            <?php endforeach; ?>
+          <?php else: ?>
+            <div class="overview-row"><div class="label">No terminals added yet</div><div class="value">0</div></div>
+          <?php endif; ?>
+        </div>
+      </details>
 
-                  <details class="overview-group">
-                    <summary>
-                      <span>Trip status</span>
-                      <span class="overview-chevron" aria-hidden="true">⌄</span>
-                    </summary>
-                    <div class="overview-list">
-                      <div class="overview-row"><div class="label">Unassigned driver</div><div class="value"><?php echo esc((string)$unassignedCount); ?></div></div>
-                      <div class="overview-row"><div class="label">Assigned</div><div class="value"><?php echo esc((string)$assignedTripCount); ?></div></div>
-                      <div class="overview-row"><div class="label">In progress</div><div class="value">0</div></div>
-                      <div class="overview-row"><div class="label">Completed</div><div class="value">0</div></div>
-                    </div>
-                  </details>
+      <details class="overview-group">
+        <summary>
+          <span>Time slots</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <div class="overview-row"><div class="label">Early (5–9am)</div><div class="value"><?php echo esc((string)$timeSlotCounts['early']); ?></div></div>
+          <div class="overview-row"><div class="label">Day (9am–5pm)</div><div class="value"><?php echo esc((string)$timeSlotCounts['day']); ?></div></div>
+          <div class="overview-row"><div class="label">Evening (5–10pm)</div><div class="value"><?php echo esc((string)$timeSlotCounts['evening']); ?></div></div>
+          <div class="overview-row"><div class="label">Late (10pm+)</div><div class="value"><?php echo esc((string)$timeSlotCounts['late']); ?></div></div>
+        </div>
+      </details>
 
-                  <details class="overview-group">
-                    <summary>
-                      <span>Pick up locations</span>
-                      <span class="overview-chevron" aria-hidden="true">⌄</span>
-                    </summary>
-                    <div class="overview-list">
-                      <?php if ($pickupLocationCounts): ?>
-                        <?php foreach (array_slice($pickupLocationCounts, 0, 5, true) as $location => $count): ?>
-                          <div class="overview-row"><div class="label"><?php echo esc($location); ?></div><div class="value"><?php echo esc((string)$count); ?></div></div>
-                        <?php endforeach; ?>
-                      <?php else: ?>
-                        <div class="overview-row"><div class="label">No terminals added yet</div><div class="value">0</div></div>
-                      <?php endif; ?>
-                    </div>
-                  </details>
+      <details class="overview-group">
+        <summary>
+          <span>Missing travel details</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <?php if ($missingTravelGuests): ?>
+            <?php foreach (array_slice($missingTravelGuests, 0, 6) as $guest): ?>
+              <div class="overview-guest-item">
+                <div class="overview-guest-name"><?php echo esc($guest['name']); ?></div>
+                <div class="overview-guest-meta"><?php echo esc($guest['side']); ?></div>
+                <div class="overview-guest-missing">
+                  Missing: <?php echo esc(implode(', ', $guest['missing'])); ?>
+                </div>
+              </div>
+            <?php endforeach; ?>
 
-                  <details class="overview-group">
-                    <summary>
-                      <span>Time slots</span>
-                      <span class="overview-chevron" aria-hidden="true">⌄</span>
-                    </summary>
-                    <div class="overview-list">
-                      <div class="overview-row"><div class="label">Early (5–9am)</div><div class="value"><?php echo esc((string)$timeSlotCounts['early']); ?></div></div>
-                      <div class="overview-row"><div class="label">Day (9am–5pm)</div><div class="value"><?php echo esc((string)$timeSlotCounts['day']); ?></div></div>
-                      <div class="overview-row"><div class="label">Evening (5–10pm)</div><div class="value"><?php echo esc((string)$timeSlotCounts['evening']); ?></div></div>
-                      <div class="overview-row"><div class="label">Late (10pm+)</div><div class="value"><?php echo esc((string)$timeSlotCounts['late']); ?></div></div>
-                    </div>
-                  </details>
+            <?php if (count($missingTravelGuests) > 6): ?>
+              <div class="overview-guest-more">
+                +<?php echo esc((string)(count($missingTravelGuests) - 6)); ?> more guests with incomplete travel details
+              </div>
+            <?php endif; ?>
+          <?php else: ?>
+            <div class="overview-row">
+              <div class="label">No incomplete travel details</div>
+              <div class="value">0</div>
+            </div>
+          <?php endif; ?>
+        </div>
+      </details>
 
-                  <details class="overview-group">
-  <summary>
-    <span>Missing travel details</span>
-    <span class="overview-chevron" aria-hidden="true">⌄</span>
-  </summary>
-  <div class="overview-list">
-    <?php if ($missingTravelGuests): ?>
-      <?php foreach (array_slice($missingTravelGuests, 0, 6) as $guest): ?>
-        <div class="overview-guest-item">
-          <div class="overview-guest-name"><?php echo esc($guest['name']); ?></div>
-          <div class="overview-guest-meta"><?php echo esc($guest['side']); ?></div>
-          <div class="overview-guest-missing">
-            Missing: <?php echo esc(implode(', ', $guest['missing'])); ?>
+      <details class="overview-group">
+        <summary>
+          <span>Special handling</span>
+          <span class="overview-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="overview-list">
+          <?php foreach ($specialCounts as $label => $count): ?>
+            <div class="overview-row"><div class="label"><?php echo esc($label); ?></div><div class="value"><?php echo esc((string)$count); ?></div></div>
+          <?php endforeach; ?>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="card proj-card travel-detail-card">
+    <?php if ($selectedGuest): ?>
+      <?php
+        $closeUrl = travel_page_url(
+          $projectId,
+          $bucket,
+          $searchQ,
+          $filterSide,
+          $filterMode,
+          $filterTerminal,
+          $filterDriver,
+          0
+        );
+      ?>
+
+      <div class="travel-detail-topline">
+        <div class="travel-detail-label">Guest detail</div>
+        <a class="travel-close" href="<?php echo esc($closeUrl); ?>" aria-label="Close travel details">×</a>
+      </div>
+
+      <div class="travel-detail-head">
+        <div>
+          <h3 class="travel-detail-title"><?php echo esc($selectedGuestName); ?></h3>
+          <div class="travel-detail-sub"><?php echo esc($selectedGuestSide); ?></div>
+        </div>
+      </div>
+
+      <div class="travel-detail-divider"><span>✧</span></div>
+
+      <div class="travel-detail-top-grid">
+        <div>
+          <div class="travel-field-label">Relation</div>
+          <input class="travel-input" type="text" value="<?php echo esc($selectedGuestRelation !== '' ? $selectedGuestRelation : 'Not added'); ?>" readonly>
+        </div>
+        <div>
+          <div class="travel-field-label">Family Group</div>
+          <input class="travel-input" type="text" value="<?php echo esc($selectedGuestFamilyGroup !== '' ? $selectedGuestFamilyGroup : 'Not added'); ?>" readonly>
+        </div>
+      </div>
+
+      <div class="travel-section">
+        <div class="travel-section-title">Travel information</div>
+
+        <div class="travel-mini-grid">
+          <div>
+            <div class="travel-field-label">Pick up</div>
+            <select class="travel-select" disabled>
+              <option <?php echo $selectedPickupRequired === 1 ? 'selected' : ''; ?>>Yes</option>
+              <option <?php echo $selectedPickupRequired !== 1 ? 'selected' : ''; ?>>No</option>
+            </select>
+          </div>
+          <div>
+            <div class="travel-field-label">Drop off</div>
+            <select class="travel-select" disabled>
+              <option <?php echo $selectedDropRequired === 1 ? 'selected' : ''; ?>>Yes</option>
+              <option <?php echo $selectedDropRequired !== 1 ? 'selected' : ''; ?>>No</option>
+            </select>
           </div>
         </div>
-      <?php endforeach; ?>
+      </div>
 
-      <?php if (count($missingTravelGuests) > 6): ?>
-        <div class="overview-guest-more">
-          +<?php echo esc((string)(count($missingTravelGuests) - 6)); ?> more guests with incomplete travel details
+      <div class="travel-section">
+        <div class="travel-section-title">Arrival</div>
+
+        <div>
+          <div class="travel-field-label">Assigned driver</div>
+          <input class="travel-input" type="text" value="Select driver" readonly>
         </div>
-      <?php endif; ?>
+
+        <div class="travel-mini-grid" style="margin-top:10px;">
+          <div>
+            <div class="travel-field-label">Arrival date</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalDate !== '' ? $selectedArrivalDate : 'dd/mm/yyyy'); ?>" readonly>
+          </div>
+          <div>
+            <div class="travel-field-label">Flight / train number</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalRef !== '' ? $selectedArrivalRef : 'eg. AI-1234'); ?>" readonly>
+          </div>
+        </div>
+
+        <div class="travel-mini-grid" style="margin-top:10px;">
+          <div>
+            <div class="travel-field-label">Arrival time</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTime !== '' ? $selectedArrivalTime : 'Not added'); ?>" readonly>
+          </div>
+          <div>
+            <div class="travel-field-label">Terminal</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTerminal !== '' ? $selectedArrivalTerminal : 'Not added'); ?>" readonly>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <div class="travel-field-label">Pick up notes</div>
+          <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
+        </div>
+      </div>
+
+      <div class="travel-section">
+        <div class="travel-section-title">Departure</div>
+
+        <div>
+          <div class="travel-field-label">Assigned driver</div>
+          <input class="travel-input" type="text" value="Select driver" readonly>
+        </div>
+
+        <div class="travel-mini-grid" style="margin-top:10px;">
+          <div>
+            <div class="travel-field-label">Departure date</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureDate !== '' ? $selectedDepartureDate : 'dd/mm/yyyy'); ?>" readonly>
+          </div>
+          <div>
+            <div class="travel-field-label">Flight / train number</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureRef !== '' ? $selectedDepartureRef : 'eg. AI-1234'); ?>" readonly>
+          </div>
+        </div>
+
+        <div class="travel-mini-grid" style="margin-top:10px;">
+          <div>
+            <div class="travel-field-label">Departure time</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTime !== '' ? $selectedDepartureTime : 'Not added'); ?>" readonly>
+          </div>
+          <div>
+            <div class="travel-field-label">Terminal</div>
+            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTerminal !== '' ? $selectedDepartureTerminal : 'Not added'); ?>" readonly>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <div class="travel-field-label">Drop notes</div>
+          <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
+        </div>
+      </div>
+
+      <div class="travel-detail-actions">
+        <a class="btn" href="<?php echo esc(base_url('guests/create.php?project_id=' . $projectId . '&guest_id=' . (int)($selectedGuest['id'] ?? 0))); ?>">Edit guest</a>
+      </div>
     <?php else: ?>
-      <div class="overview-row">
-        <div class="label">No incomplete travel details</div>
-        <div class="value">0</div>
+      <div class="travel-detail-empty">
+        <div>
+          <div class="travel-detail-empty-title">Select a guest</div>
+          <div class="travel-detail-empty-sub">
+            Click any guest row to open the travel detail bento on the right and review their transport information.
+          </div>
+        </div>
       </div>
     <?php endif; ?>
-  </div>
-</details>
-
-                  <details class="overview-group">
-                    <summary>
-                      <span>Special handling</span>
-                      <span class="overview-chevron" aria-hidden="true">⌄</span>
-                    </summary>
-                    <div class="overview-list">
-                      <?php foreach ($specialCounts as $label => $count): ?>
-                        <div class="overview-row"><div class="label"><?php echo esc($label); ?></div><div class="value"><?php echo esc((string)$count); ?></div></div>
-                      <?php endforeach; ?>
-                    </div>
-                  </details>
-                </div>
-              </section>
-            </aside>
+  </section>
+</aside>
           </div>
         </div>
       </div>
     </div>
   </section>
 </div>
+
+
+
+
+
+
+     
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const rows = document.querySelectorAll("[data-travel-row-url]");
+
+  rows.forEach((row) => {
+    const url = row.getAttribute("data-travel-row-url");
+    if (!url) return;
+
+    row.addEventListener("click", function (e) {
+      if (e.target.closest("a, button, input, textarea, select, label")) return;
+      window.location.href = url;
+    });
+
+    row.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        window.location.href = url;
+      }
+    });
+  });
+});
+</script>
 
 <?php require_once $root . '/includes/footer.php'; ?>
