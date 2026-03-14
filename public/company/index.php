@@ -17,7 +17,7 @@ $companyId = (int)($_SESSION['company_id'] ?? 0);
 $errors = [];
 $success = '';
 
-$deptOptions = ['coordination','rsvp','hospitality','transport','vendor'];
+$deptOptions = ['coordination','rsvp','hospitality','transport','vendor','driver'];
 $statusOptions = ['active','invited','inactive'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -150,7 +150,7 @@ if ($adminName === '') $adminName = 'Admin';
             <input class="input" name="phone" placeholder="+91...">
           </div>
           <div>
-            <div class="label">Default department</div>
+            <div class="label">Default responsibility</div>
             <select class="input" name="default_department">
               <?php foreach ($deptOptions as $d): ?>
                 <option value="<?php echo h($d); ?>"><?php echo h(ucfirst($d)); ?></option>
@@ -189,7 +189,7 @@ if ($adminName === '') $adminName = 'Admin';
             <thead style="color:var(--muted); font-size:12px; text-align:left;">
               <tr>
                 <th>Name</th>
-                <th>Role/Dept</th>
+                <th>Responsibility</th>
                 <th>Email</th>
                 <th>Status</th>
                 <th>Added</th>

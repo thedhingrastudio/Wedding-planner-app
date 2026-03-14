@@ -620,6 +620,8 @@ $selectedDepartureTime = '';
 $selectedDepartureRef = '';
 $selectedDepartureTerminal = '';
 $selectedTransportNotes = '';
+$selectedArrivalDriver = 'Select driver';
+$selectedDepartureDriver = 'Select driver';
 
 if ($selectedGuest) {
   $selectedGuestName = guest_full_name($selectedGuest);
@@ -637,6 +639,8 @@ if ($selectedGuest) {
   $selectedDepartureRef = trim((string)($selectedGuest['departure_ref'] ?? ''));
   $selectedDepartureTerminal = trim((string)($selectedGuest['departure_terminal'] ?? ''));
   $selectedTransportNotes = trim((string)($selectedGuest['transport_notes'] ?? ''));
+  $selectedArrivalDriver = travel_driver_label($selectedGuest, 'arrival');
+  $selectedDepartureDriver = travel_driver_label($selectedGuest, 'departure');
 }
 
 
@@ -694,7 +698,7 @@ require_once $root . '/includes/header.php';
 
 .travel-top-grid{
   display:grid;
-  grid-template-columns:minmax(0,1fr) 320px;
+  grid-template-columns:minmax(0,1fr) 340px;
   gap:16px;
   align-items:start;
 }
@@ -702,9 +706,15 @@ require_once $root . '/includes/header.php';
   .travel-top-grid{ grid-template-columns:1fr; }
 }
 
-.travel-main{ min-width:0; }
+.travel-main{
+  min-width:0;
+}
+
 .travel-side{
   min-width:0;
+  width:100%;
+  max-width:340px;
+  justify-self:end;
   display:flex;
   flex-direction:column;
   gap:16px;
@@ -714,7 +724,7 @@ require_once $root . '/includes/header.php';
   display:grid;
   grid-template-columns:repeat(5, minmax(0,1fr));
   gap:12px;
-  margin-bottom:14px;
+  margin:0 0 14px 0;
 }
 @media (max-width:1180px){
   .travel-stat-row{ grid-template-columns:repeat(2, minmax(0,1fr)); }
@@ -724,7 +734,10 @@ require_once $root . '/includes/header.php';
 }
 
 .travel-stat-card{
-  display:block;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  min-height:88px;
   text-decoration:none;
   padding:16px 18px;
   border-radius:22px;
@@ -1237,6 +1250,57 @@ require_once $root . '/includes/header.php';
   flex-wrap:wrap;
 }
 
+.travel-accordion-wrap{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  margin-top:14px;
+}
+
+.travel-accordion{
+  border-top:1px solid rgba(0,0,0,0.06);
+  padding-top:12px;
+}
+
+.travel-accordion summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:2px 0 6px;
+}
+
+.travel-accordion summary::-webkit-details-marker{
+  display:none;
+}
+
+.travel-accordion-title{
+  font-size:16px;
+  font-weight:800;
+  color:#1f1f22;
+  line-height:1.2;
+}
+
+.travel-accordion-chevron{
+  color:#8a8a90;
+  font-weight:400;
+  font-size:16px;
+  line-height:1;
+  transition:transform 160ms ease;
+}
+
+.travel-accordion[open] .travel-accordion-chevron{
+  transform:rotate(180deg);
+}
+
+.travel-accordion-body{
+  padding-top:10px;
+}
+
+
+
 @media (max-width:980px){
   .travel-head{
     flex-direction:column;
@@ -1281,11 +1345,7 @@ require_once $root . '/includes/header.php';
           </div>
         </div>
 
-        <div class="proj-top-actions">
-          <a class="btn btn-primary" href="<?php echo esc(base_url('tasks/index.php?project_id=' . $projectId)); ?>">＋ Add task</a>
-          <a class="btn" href="<?php echo esc(base_url('projects/add_member.php?id=' . $projectId)); ?>">＋ Add member</a>
-          <a class="btn icon-btn" href="<?php echo esc(base_url('projects/contract.php?id=' . $projectId)); ?>" title="Project settings">⚙</a>
-        </div>
+        
       </div>
 
       <div class="project-shell">
@@ -1309,35 +1369,35 @@ require_once $root . '/includes/header.php';
             </div>
           </div>
 
+          <div class="travel-stat-row">
+            <a class="travel-stat-card <?php echo $bucket === 'arrivals' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'arrivals')); ?>">
+              <div class="travel-stat-title">Arrivals</div>
+              <div class="travel-stat-sub"><?php echo esc((string)$arrivalsCount); ?> scheduled</div>
+            </a>
+
+            <a class="travel-stat-card <?php echo $bucket === 'departures' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'departures')); ?>">
+              <div class="travel-stat-title">Departures</div>
+              <div class="travel-stat-sub"><?php echo esc((string)$departuresCount); ?> scheduled</div>
+            </a>
+
+            <a class="travel-stat-card <?php echo $bucket === 'unassigned' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'unassigned')); ?>">
+              <div class="travel-stat-title">Unassigned</div>
+              <div class="travel-stat-sub"><?php echo esc((string)$unassignedCount); ?> trips unassigned</div>
+            </a>
+
+            <a class="travel-stat-card <?php echo $bucket === 'care' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'care')); ?>">
+              <div class="travel-stat-title">VIP / Elder care</div>
+              <div class="travel-stat-sub"><?php echo esc((string)$careCount); ?> guests require special care</div>
+            </a>
+
+            <a class="travel-stat-card <?php echo $bucket === 'drivers' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'drivers')); ?>">
+              <div class="travel-stat-title">Drivers</div>
+              <div class="travel-stat-sub"><?php echo esc((string)$unassignedCount); ?> trips unassigned</div>
+            </a>
+          </div>
+
           <div class="travel-top-grid">
             <div class="travel-main">
-              <div class="travel-stat-row">
-                <a class="travel-stat-card <?php echo $bucket === 'arrivals' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'arrivals')); ?>">
-                  <div class="travel-stat-title">Arrivals</div>
-                  <div class="travel-stat-sub"><?php echo esc((string)$arrivalsCount); ?> scheduled</div>
-                </a>
-
-                <a class="travel-stat-card <?php echo $bucket === 'departures' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'departures')); ?>">
-                  <div class="travel-stat-title">Departures</div>
-                  <div class="travel-stat-sub"><?php echo esc((string)$departuresCount); ?> scheduled</div>
-                </a>
-
-                <a class="travel-stat-card <?php echo $bucket === 'unassigned' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'unassigned')); ?>">
-                  <div class="travel-stat-title">Unassigned</div>
-                  <div class="travel-stat-sub"><?php echo esc((string)$unassignedCount); ?> trips unassigned</div>
-                </a>
-
-                <a class="travel-stat-card <?php echo $bucket === 'care' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'care')); ?>">
-                  <div class="travel-stat-title">VIP / Elder care</div>
-                  <div class="travel-stat-sub"><?php echo esc((string)$careCount); ?> guests require special care</div>
-                </a>
-
-                <a class="travel-stat-card <?php echo $bucket === 'drivers' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'drivers')); ?>">
-                  <div class="travel-stat-title">Drivers</div>
-                  <div class="travel-stat-sub"><?php echo esc((string)$unassignedCount); ?> trips unassigned</div>
-                </a>
-              </div>
-
               <form method="get">
                 <input type="hidden" name="project_id" value="<?php echo esc((string)$projectId); ?>">
                 <input type="hidden" name="bucket" value="<?php echo esc($bucket); ?>">
@@ -1471,7 +1531,7 @@ require_once $root . '/includes/header.php';
     <p class="overview-sub">What needs cleaning before pickups and drops go out.</p>
 
     <div class="overview-wrap">
-      <details class="overview-group" open>
+      <details class="overview-group">
         <summary>
           <span>At risk</span>
           <span class="overview-chevron" aria-hidden="true">⌄</span>
@@ -1597,110 +1657,129 @@ require_once $root . '/includes/header.php';
         </div>
       </div>
 
-      <div class="travel-detail-divider"><span>✧</span></div>
+      <div class="travel-accordion-wrap">
+        <details class="travel-accordion">
+          <summary>
+            <span class="travel-accordion-title">Contact information</span>
+            <span class="travel-accordion-chevron" aria-hidden="true">⌄</span>
+          </summary>
 
-      <div class="travel-detail-top-grid">
-        <div>
-          <div class="travel-field-label">Relation</div>
-          <input class="travel-input" type="text" value="<?php echo esc($selectedGuestRelation !== '' ? $selectedGuestRelation : 'Not added'); ?>" readonly>
-        </div>
-        <div>
-          <div class="travel-field-label">Family Group</div>
-          <input class="travel-input" type="text" value="<?php echo esc($selectedGuestFamilyGroup !== '' ? $selectedGuestFamilyGroup : 'Not added'); ?>" readonly>
-        </div>
-      </div>
+          <div class="travel-accordion-body">
+            <div class="travel-detail-top-grid">
+              <div>
+                <div class="travel-field-label">Relation</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedGuestRelation !== '' ? $selectedGuestRelation : 'Not added'); ?>" readonly>
+              </div>
+              <div>
+                <div class="travel-field-label">Family Group</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedGuestFamilyGroup !== '' ? $selectedGuestFamilyGroup : 'Not added'); ?>" readonly>
+              </div>
+            </div>
 
-      <div class="travel-section">
-        <div class="travel-section-title">Travel information</div>
+            <div class="travel-section" style="margin-top:14px;">
+              <div class="travel-section-title">Travel information</div>
 
-        <div class="travel-mini-grid">
-          <div>
-            <div class="travel-field-label">Pick up</div>
-            <select class="travel-select" disabled>
-              <option <?php echo $selectedPickupRequired === 1 ? 'selected' : ''; ?>>Yes</option>
-              <option <?php echo $selectedPickupRequired !== 1 ? 'selected' : ''; ?>>No</option>
-            </select>
+              <div class="travel-mini-grid">
+                <div>
+                  <div class="travel-field-label">Pick up</div>
+                  <select class="travel-select" disabled>
+                    <option <?php echo $selectedPickupRequired === 1 ? 'selected' : ''; ?>>Yes</option>
+                    <option <?php echo $selectedPickupRequired !== 1 ? 'selected' : ''; ?>>No</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="travel-field-label">Drop off</div>
+                  <select class="travel-select" disabled>
+                    <option <?php echo $selectedDropRequired === 1 ? 'selected' : ''; ?>>Yes</option>
+                    <option <?php echo $selectedDropRequired !== 1 ? 'selected' : ''; ?>>No</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <div class="travel-field-label">Drop off</div>
-            <select class="travel-select" disabled>
-              <option <?php echo $selectedDropRequired === 1 ? 'selected' : ''; ?>>Yes</option>
-              <option <?php echo $selectedDropRequired !== 1 ? 'selected' : ''; ?>>No</option>
-            </select>
+        </details>
+
+        <details class="travel-accordion">
+          <summary>
+            <span class="travel-accordion-title">Arrival</span>
+            <span class="travel-accordion-chevron" aria-hidden="true">⌄</span>
+          </summary>
+
+          <div class="travel-accordion-body">
+            <div>
+              <div class="travel-field-label">Assigned driver</div>
+              <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalDriver); ?>" readonly>
+            </div>
+
+            <div class="travel-mini-grid" style="margin-top:10px;">
+              <div>
+                <div class="travel-field-label">Arrival date</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalDate !== '' ? $selectedArrivalDate : 'dd/mm/yyyy'); ?>" readonly>
+              </div>
+              <div>
+                <div class="travel-field-label">Flight / train number</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalRef !== '' ? $selectedArrivalRef : 'eg. AI-1234'); ?>" readonly>
+              </div>
+            </div>
+
+            <div class="travel-mini-grid" style="margin-top:10px;">
+              <div>
+                <div class="travel-field-label">Arrival time</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTime !== '' ? $selectedArrivalTime : 'Not added'); ?>" readonly>
+              </div>
+              <div>
+                <div class="travel-field-label">Terminal</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTerminal !== '' ? $selectedArrivalTerminal : 'Not added'); ?>" readonly>
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <div class="travel-field-label">Pick up notes</div>
+              <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
+            </div>
           </div>
-        </div>
-      </div>
+        </details>
 
-      <div class="travel-section">
-        <div class="travel-section-title">Arrival</div>
+        <details class="travel-accordion">
+          <summary>
+            <span class="travel-accordion-title">Departure</span>
+            <span class="travel-accordion-chevron" aria-hidden="true">⌄</span>
+          </summary>
 
-        <div>
-          <div class="travel-field-label">Assigned driver</div>
-          <input class="travel-input" type="text" value="Select driver" readonly>
-        </div>
+          <div class="travel-accordion-body">
+            <div>
+              <div class="travel-field-label">Assigned driver</div>
+              <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureDriver); ?>" readonly>
+            </div>
 
-        <div class="travel-mini-grid" style="margin-top:10px;">
-          <div>
-            <div class="travel-field-label">Arrival date</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalDate !== '' ? $selectedArrivalDate : 'dd/mm/yyyy'); ?>" readonly>
+            <div class="travel-mini-grid" style="margin-top:10px;">
+              <div>
+                <div class="travel-field-label">Departure date</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureDate !== '' ? $selectedDepartureDate : 'dd/mm/yyyy'); ?>" readonly>
+              </div>
+              <div>
+                <div class="travel-field-label">Flight / train number</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureRef !== '' ? $selectedDepartureRef : 'eg. AI-1234'); ?>" readonly>
+              </div>
+            </div>
+
+            <div class="travel-mini-grid" style="margin-top:10px;">
+              <div>
+                <div class="travel-field-label">Departure time</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTime !== '' ? $selectedDepartureTime : 'Not added'); ?>" readonly>
+              </div>
+              <div>
+                <div class="travel-field-label">Terminal</div>
+                <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTerminal !== '' ? $selectedDepartureTerminal : 'Not added'); ?>" readonly>
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <div class="travel-field-label">Drop notes</div>
+              <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
+            </div>
           </div>
-          <div>
-            <div class="travel-field-label">Flight / train number</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalRef !== '' ? $selectedArrivalRef : 'eg. AI-1234'); ?>" readonly>
-          </div>
-        </div>
-
-        <div class="travel-mini-grid" style="margin-top:10px;">
-          <div>
-            <div class="travel-field-label">Arrival time</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTime !== '' ? $selectedArrivalTime : 'Not added'); ?>" readonly>
-          </div>
-          <div>
-            <div class="travel-field-label">Terminal</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalTerminal !== '' ? $selectedArrivalTerminal : 'Not added'); ?>" readonly>
-          </div>
-        </div>
-
-        <div style="margin-top:10px;">
-          <div class="travel-field-label">Pick up notes</div>
-          <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
-        </div>
-      </div>
-
-      <div class="travel-section">
-        <div class="travel-section-title">Departure</div>
-
-        <div>
-          <div class="travel-field-label">Assigned driver</div>
-          <input class="travel-input" type="text" value="Select driver" readonly>
-        </div>
-
-        <div class="travel-mini-grid" style="margin-top:10px;">
-          <div>
-            <div class="travel-field-label">Departure date</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureDate !== '' ? $selectedDepartureDate : 'dd/mm/yyyy'); ?>" readonly>
-          </div>
-          <div>
-            <div class="travel-field-label">Flight / train number</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureRef !== '' ? $selectedDepartureRef : 'eg. AI-1234'); ?>" readonly>
-          </div>
-        </div>
-
-        <div class="travel-mini-grid" style="margin-top:10px;">
-          <div>
-            <div class="travel-field-label">Departure time</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTime !== '' ? $selectedDepartureTime : 'Not added'); ?>" readonly>
-          </div>
-          <div>
-            <div class="travel-field-label">Terminal</div>
-            <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureTerminal !== '' ? $selectedDepartureTerminal : 'Not added'); ?>" readonly>
-          </div>
-        </div>
-
-        <div style="margin-top:10px;">
-          <div class="travel-field-label">Drop notes</div>
-          <input class="travel-input" type="text" value="<?php echo esc($selectedTransportNotes !== '' ? $selectedTransportNotes : 'Not added'); ?>" readonly>
-        </div>
+        </details>
       </div>
 
       <div class="travel-detail-actions">

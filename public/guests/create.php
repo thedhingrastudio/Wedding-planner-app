@@ -263,9 +263,11 @@ if ($existingGuest) {
     'arrival_time'     => (string)($existingGuest['arrival_time'] ?? ''),
     'arrival_ref'      => (string)($existingGuest['arrival_ref'] ?? ''),
     'arrival_terminal' => (string)($existingGuest['arrival_terminal'] ?? ''),
+    'arrival_driver'   => (string)($existingGuest['arrival_driver'] ?? ''),
     'departure_date'   => (string)($existingGuest['departure_date'] ?? ''),
     'departure_time'   => (string)($existingGuest['departure_time'] ?? ''),
     'departure_ref'    => (string)($existingGuest['departure_ref'] ?? ''),
+     'departure_driver' => (string)($existingGuest['departure_driver'] ?? ''),
     'transport_notes'  => (string)($existingGuest['transport_notes'] ?? ''),
     'checkin_date'     => (string)($existingGuest['checkin_date'] ?? ''),
     'checkout_date'    => (string)($existingGuest['checkout_date'] ?? ''),
@@ -366,9 +368,11 @@ $city              = trim((string)($_POST['city'] ?? ''));
   $arrivalTime       = normalize_text_input($_POST['arrival_time'] ?? null);
   $arrivalRef        = trim((string)($_POST['arrival_ref'] ?? ''));
   $arrivalTerminal   = trim((string)($_POST['arrival_terminal'] ?? ''));
+  $arrivalDriver     = trim((string)($_POST['arrival_driver'] ?? ''));
   $departureDate     = normalize_date_input($_POST['departure_date'] ?? null);
   $departureTime     = normalize_text_input($_POST['departure_time'] ?? null);
   $departureRef      = trim((string)($_POST['departure_ref'] ?? ''));
+    $departureDriver   = trim((string)($_POST['departure_driver'] ?? ''));
   $transportNotes    = trim((string)($_POST['transport_notes'] ?? ''));
 
   $checkinDate       = normalize_date_input($_POST['checkin_date'] ?? null);
@@ -445,9 +449,11 @@ $city              = trim((string)($_POST['city'] ?? ''));
             arrival_time = :arrival_time,
             arrival_ref = :arrival_ref,
             arrival_terminal = :arrival_terminal,
+            arrival_driver = :arrival_driver,
             departure_date = :departure_date,
             departure_time = :departure_time,
             departure_ref = :departure_ref,
+             departure_driver = :departure_driver,
             transport_notes = :transport_notes,
             checkin_date = :checkin_date,
             checkout_date = :checkout_date,
@@ -485,9 +491,11 @@ $city              = trim((string)($_POST['city'] ?? ''));
           ':arrival_time'      => $arrivalTime,
           ':arrival_ref'       => $arrivalRef !== '' ? $arrivalRef : null,
           ':arrival_terminal'  => $arrivalTerminal !== '' ? $arrivalTerminal : null,
+          ':arrival_driver'    => $arrivalDriver !== '' ? $arrivalDriver : null,
           ':departure_date'    => $departureDate,
           ':departure_time'    => $departureTime,
           ':departure_ref'     => $departureRef !== '' ? $departureRef : null,
+          ':departure_driver'  => $departureDriver !== '' ? $departureDriver : null,
           ':transport_notes'   => $transportNotes !== '' ? $transportNotes : null,
           ':checkin_date'      => $checkinDate,
           ':checkout_date'     => $checkoutDate,
@@ -508,8 +516,8 @@ $city              = trim((string)($_POST['city'] ?? ''));
             phone, email, address,
             accessibility, special_notes, diet_preference, allergies,
             pickup_required, drop_required,
-            arrival_date, arrival_time, arrival_ref, arrival_terminal,
-            departure_date, departure_time, departure_ref,
+            arrival_date, arrival_time, arrival_ref, arrival_terminal, arrival_driver,
+            departure_date, departure_time, departure_ref, departure_driver,
             transport_notes,
             checkin_date, checkout_date, room_type, bed_type,
             id_document_note, stay_notes,
@@ -520,8 +528,8 @@ $city              = trim((string)($_POST['city'] ?? ''));
             :phone, :email, :address,
             :accessibility, :special_notes, :diet_preference, :allergies,
             :pickup_required, :drop_required,
-            :arrival_date, :arrival_time, :arrival_ref, :arrival_terminal,
-            :departure_date, :departure_time, :departure_ref,
+            :arrival_date, :arrival_time, :arrival_ref, :arrival_terminal, :arrival_driver,
+            :departure_date, :departure_time, :departure_ref, :departure_driver,
             :transport_notes,
             :checkin_date, :checkout_date, :room_type, :bed_type,
             :id_document_note, :stay_notes,
@@ -554,10 +562,12 @@ $city              = trim((string)($_POST['city'] ?? ''));
           ':arrival_time'      => $arrivalTime,
           ':arrival_ref'       => $arrivalRef !== '' ? $arrivalRef : null,
           ':arrival_terminal'  => $arrivalTerminal !== '' ? $arrivalTerminal : null,
+          ':arrival_driver'    => $arrivalDriver !== '' ? $arrivalDriver : null,
           ':departure_date'    => $departureDate,
           ':departure_time'    => $departureTime,
           ':departure_ref'     => $departureRef !== '' ? $departureRef : null,
           ':transport_notes'   => $transportNotes !== '' ? $transportNotes : null,
+          ':departure_driver'  => $departureDriver !== '' ? $departureDriver : null,
           ':checkin_date'      => $checkinDate,
           ':checkout_date'     => $checkoutDate,
           ':room_type'         => $roomType !== '' ? $roomType : null,
@@ -1088,7 +1098,7 @@ require_once $root . '/includes/header.php';
                   <h2 class="form-card-title">Travel information</h2>
                   <p class="form-card-sub">Capture arrival and departure needs for pickup and drop coordination.</p>
 
-                  <div class="form-grid">
+                                     <div class="form-grid">
                     <div class="field">
                       <label for="pickup_required">Pickup needed</label>
                       <select id="pickup_required" name="pickup_required">
@@ -1111,6 +1121,17 @@ require_once $root . '/includes/header.php';
                   <div class="form-divider"></div>
 
                   <div class="form-grid">
+                    <div class="field" style="grid-column:1 / -1;">
+                      <label for="arrival_driver">Arrival driver</label>
+                      <input
+                        id="arrival_driver"
+                        name="arrival_driver"
+                        type="text"
+                        placeholder="Select arrival driver"
+                        value="<?php echo esc(request_value('arrival_driver', $defaults)); ?>"
+                      >
+                    </div>
+
                     <div class="field">
                       <label for="arrival_date">Arrival date</label>
                       <input id="arrival_date" name="arrival_date" type="date" value="<?php echo esc(request_value('arrival_date', $defaults)); ?>">
@@ -1122,22 +1143,43 @@ require_once $root . '/includes/header.php';
                     </div>
 
                     <div class="field">
-  <label for="arrival_ref">Arrival flight / train no.</label>
-  <input
-    id="arrival_ref"
-    name="arrival_ref"
-    type="text"
-    placeholder="e.g. AI-1234"
-    value="<?php echo esc(request_value('arrival_ref', $defaults)); ?>"
-  >
-  <div class="travel-detect-note" id="arrival_ref_detect">
-    Detected travel type: <strong>Not sure</strong>
-  </div>
-</div>
+                      <label for="arrival_ref">Arrival flight / train no.</label>
+                      <input
+                        id="arrival_ref"
+                        name="arrival_ref"
+                        type="text"
+                        placeholder="e.g. AI-1234"
+                        value="<?php echo esc(request_value('arrival_ref', $defaults)); ?>"
+                      >
+                      <div class="travel-detect-note" id="arrival_ref_detect">
+                        Detected travel type: <strong>Not sure</strong>
+                      </div>
+                    </div>
 
                     <div class="field">
                       <label for="arrival_terminal">Arrival terminal / platform</label>
-                      <input id="arrival_terminal" name="arrival_terminal" type="text" placeholder="e.g. T3 / Platform 4" value="<?php echo esc(request_value('arrival_terminal', $defaults)); ?>">
+                      <input
+                        id="arrival_terminal"
+                        name="arrival_terminal"
+                        type="text"
+                        placeholder="e.g. T3 / Platform 4"
+                        value="<?php echo esc(request_value('arrival_terminal', $defaults)); ?>"
+                      >
+                    </div>
+                  </div>
+
+                  <div class="form-divider"></div>
+
+                  <div class="form-grid">
+                    <div class="field" style="grid-column:1 / -1;">
+                      <label for="departure_driver">Departure driver</label>
+                      <input
+                        id="departure_driver"
+                        name="departure_driver"
+                        type="text"
+                        placeholder="Select departure driver"
+                        value="<?php echo esc(request_value('departure_driver', $defaults)); ?>"
+                      >
                     </div>
 
                     <div class="field">
@@ -1151,22 +1193,28 @@ require_once $root . '/includes/header.php';
                     </div>
 
                     <div class="field">
-  <label for="departure_ref">Departure flight / train no.</label>
-  <input
-    id="departure_ref"
-    name="departure_ref"
-    type="text"
-    placeholder="e.g. 12345"
-    value="<?php echo esc(request_value('departure_ref', $defaults)); ?>"
-  >
-  <div class="travel-detect-note" id="departure_ref_detect">
-    Detected travel type: <strong>Not sure</strong>
-  </div>
-</div>
+                      <label for="departure_ref">Departure flight / train no.</label>
+                      <input
+                        id="departure_ref"
+                        name="departure_ref"
+                        type="text"
+                        placeholder="e.g. 12345"
+                        value="<?php echo esc(request_value('departure_ref', $defaults)); ?>"
+                      >
+                      <div class="travel-detect-note" id="departure_ref_detect">
+                        Detected travel type: <strong>Not sure</strong>
+                      </div>
+                    </div>
 
                     <div class="field">
                       <label for="transport_notes">Pickup / drop remarks</label>
-                      <input id="transport_notes" name="transport_notes" type="text" placeholder="e.g. Extra luggage, senior support needed" value="<?php echo esc(request_value('transport_notes', $defaults)); ?>">
+                      <input
+                        id="transport_notes"
+                        name="transport_notes"
+                        type="text"
+                        placeholder="e.g. Extra luggage, senior support needed"
+                        value="<?php echo esc(request_value('transport_notes', $defaults)); ?>"
+                      >
                     </div>
                   </div>
                 </section>
