@@ -11,24 +11,24 @@ require_login();
 
 $pdo = $pdo ?? get_pdo();
 
-$projectId = (int)($_GET['project_id'] ?? $_GET['id'] ?? 0);
+$projectId = (int)($_GET['project_id'] ?? $_GET['id'] ?? $_POST['project_id'] ?? 0);
 if ($projectId <= 0) {
   redirect('projects/index.php');
 }
 
 $companyId      = current_company_id();
-$searchQ        = trim((string)($_GET['q'] ?? ''));
-$bucket         = trim((string)($_GET['bucket'] ?? 'arrivals'));
-$filterSide     = trim((string)($_GET['side'] ?? ''));
-$filterMode     = trim((string)($_GET['mode'] ?? ''));
-$filterTerminal = trim((string)($_GET['terminal'] ?? ''));
-$filterDriver   = trim((string)($_GET['driver'] ?? ''));
+$searchQ        = trim((string)($_GET['q'] ?? $_POST['q'] ?? ''));
+$bucket         = trim((string)($_GET['bucket'] ?? $_POST['bucket'] ?? 'arrivals'));
+$filterSide     = trim((string)($_GET['side'] ?? $_POST['side'] ?? ''));
+$filterMode     = trim((string)($_GET['mode'] ?? $_POST['mode'] ?? ''));
+$filterTerminal = trim((string)($_GET['terminal'] ?? $_POST['terminal'] ?? ''));
+$filterDriver   = trim((string)($_GET['driver'] ?? $_POST['driver'] ?? ''));
 
 $allowedBuckets = ['arrivals', 'departures', 'unassigned', 'care', 'drivers'];
 $allowedSides   = ['bride', 'groom', 'both'];
 $allowedModes   = ['flight', 'train', 'not_sure'];
 
-$selectedGuestId = (int)($_GET['guest_id'] ?? 0);
+$selectedGuestId = (int)($_GET['guest_id'] ?? $_POST['guest_id'] ?? 0);
 
 if (!in_array($bucket, $allowedBuckets, true)) $bucket = 'arrivals';
 if (!in_array($filterSide, $allowedSides, true)) $filterSide = '';
@@ -438,6 +438,7 @@ if ($firstEvent && !empty($firstEvent['starts_at'])) {
   }
 }
 
+
 $teamCount = 0;
 try {
   $tc = $pdo->prepare("
@@ -450,6 +451,133 @@ try {
 } catch (Throwable $e) {
   $teamCount = 0;
 }
+
+
+$companyDriverNames = [];
+if (table_exists_local($pdo, 'project_members')) {
+  try {
+    $ds = $pdo->prepare("
+      SELECT DISTINCT
+        COALESCE(NULLIF(TRIM(cm.full_name), ''), NULLIF(TRIM(pm.display_name), '')) AS full_name
+      FROM project_members pm
+      LEFT JOIN company_members cm
+        ON cm.id = pm.company_member_id
+       AND cm.company_id = :cid
+      WHERE pm.project_id = :pid
+        AND pm.role = 'driver'
+        AND (cm.id IS NULL OR cm.status = 'active')
+      ORDER BY full_name ASC
+    ");
+    $ds->execute([
+      ':pid' => $projectId,
+      ':cid' => $companyId,
+    ]);
+
+    foreach ($ds->fetchAll() ?: [] as $driverRow) {
+      $name = trim((string)($driverRow['full_name'] ?? ''));
+      if ($name !== '') {
+        $companyDriverNames[strtolower($name)] = $name;
+      }
+    }
+  } catch (Throwable $e) {
+    $companyDriverNames = [];
+  }
+}
+
+$driverRosterCount = count($companyDriverNames);
+
+$companyDriverNames = [];
+if (table_exists_local($pdo, 'company_members')) {
+  try {
+    $ds = $pdo->prepare("
+      SELECT full_name
+      FROM company_members
+      WHERE company_id = :cid
+        AND default_department = 'driver'
+        AND status = 'active'
+      ORDER BY full_name ASC, id ASC
+    ");
+    $ds->execute([':cid' => $companyId]);
+
+    foreach ($ds->fetchAll() ?: [] as $driverRow) {
+      $name = trim((string)($driverRow['full_name'] ?? ''));
+      if ($name !== '') {
+        $companyDriverNames[strtolower($name)] = $name;
+      }
+    }
+  } catch (Throwable $e) {
+    $companyDriverNames = [];
+  }
+}
+
+$driverRosterCount = count($companyDriverNames);
+
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_driver_assignment'])) {
+  $postedGuestId = (int)($_POST['guest_id'] ?? 0);
+  $arrivalDriverInput = trim((string)($_POST['arrival_driver'] ?? ''));
+  $departureDriverInput = trim((string)($_POST['departure_driver'] ?? ''));
+
+  $allowedDriverNames = array_values($companyDriverNames);
+  $saveErrors = [];
+
+  if ($postedGuestId <= 0) {
+    $saveErrors[] = 'Select a guest before assigning drivers.';
+  }
+
+  if ($arrivalDriverInput !== '' && !in_array($arrivalDriverInput, $allowedDriverNames, true)) {
+    $saveErrors[] = 'Selected arrival driver is not in your driver team.';
+  }
+
+  if ($departureDriverInput !== '' && !in_array($departureDriverInput, $allowedDriverNames, true)) {
+    $saveErrors[] = 'Selected departure driver is not in your driver team.';
+  }
+
+  if (!$saveErrors) {
+    try {
+      $up = $pdo->prepare("
+        UPDATE guests
+        SET
+          arrival_driver = :arrival_driver,
+          departure_driver = :departure_driver,
+          updated_at = NOW()
+        WHERE id = :guest_id
+          AND project_id = :project_id
+        LIMIT 1
+      ");
+      $up->execute([
+        ':arrival_driver'   => $arrivalDriverInput !== '' ? $arrivalDriverInput : null,
+        ':departure_driver' => $departureDriverInput !== '' ? $departureDriverInput : null,
+        ':guest_id'         => $postedGuestId,
+        ':project_id'       => $projectId,
+      ]);
+
+      if (function_exists('flash_set')) {
+        flash_set('success', 'Driver assignment updated.');
+      }
+    } catch (Throwable $e) {
+      if (function_exists('flash_set')) {
+        flash_set('error', 'Could not save driver assignment.');
+      }
+    }
+  } else {
+    if (function_exists('flash_set')) {
+      flash_set('error', $saveErrors[0]);
+    }
+  }
+
+  redirect(travel_page_url(
+    $projectId,
+    $bucket,
+    $searchQ,
+    $filterSide,
+    $filterMode,
+    $filterTerminal,
+    $filterDriver,
+    $postedGuestId
+  ));
+}
+
 
 /* ---------- Guests / trips ---------- */
 $guestRows = [];
@@ -484,18 +612,25 @@ $careTrips = array_values(array_filter($allTripRows, static fn(array $trip): boo
 $displayRows = array_values(array_filter($allTripRows, static fn(array $trip): bool => trip_matches_bucket($trip, $bucket)));
 
 $terminalOptions = [];
-$driverOptions = [];
+$driverOptions = $companyDriverNames;
 
 foreach ($displayRows as $trip) {
   $terminal = trim((string)$trip['terminal']);
-  $driver = trim((string)$trip['driver']);
+  if ($terminal !== '' && $terminal !== 'Missing') {
+    $terminalOptions[strtolower($terminal)] = $terminal;
+  }
+}
 
-  if ($terminal !== '' && $terminal !== 'Missing') $terminalOptions[strtolower($terminal)] = $terminal;
-  if ($driver !== '') $driverOptions[strtolower($driver)] = $driver;
+foreach ($allTripRows as $trip) {
+  $driver = trim((string)$trip['driver']);
+  if ($driver !== '' && $driver !== 'Unassigned') {
+    $driverOptions[strtolower($driver)] = $driver;
+  }
 }
 
 natcasesort($terminalOptions);
 natcasesort($driverOptions);
+
 
 $displayRows = array_values(array_filter($displayRows, function (array $trip) use ($searchQ, $filterSide, $filterMode, $filterTerminal, $filterDriver): bool {
   if ($searchQ !== '') {
@@ -620,8 +755,10 @@ $selectedDepartureTime = '';
 $selectedDepartureRef = '';
 $selectedDepartureTerminal = '';
 $selectedTransportNotes = '';
-$selectedArrivalDriver = 'Select driver';
-$selectedDepartureDriver = 'Select driver';
+$selectedArrivalDriver = 'Unassigned';
+$selectedDepartureDriver = 'Unassigned';
+$selectedArrivalDriverValue = '';
+$selectedDepartureDriverValue = '';
 
 if ($selectedGuest) {
   $selectedGuestName = guest_full_name($selectedGuest);
@@ -639,6 +776,8 @@ if ($selectedGuest) {
   $selectedDepartureRef = trim((string)($selectedGuest['departure_ref'] ?? ''));
   $selectedDepartureTerminal = trim((string)($selectedGuest['departure_terminal'] ?? ''));
   $selectedTransportNotes = trim((string)($selectedGuest['transport_notes'] ?? ''));
+  $selectedArrivalDriverValue = trim((string)($selectedGuest['arrival_driver'] ?? ''));
+  $selectedDepartureDriverValue = trim((string)($selectedGuest['departure_driver'] ?? ''));
   $selectedArrivalDriver = travel_driver_label($selectedGuest, 'arrival');
   $selectedDepartureDriver = travel_driver_label($selectedGuest, 'departure');
 }
@@ -1391,9 +1530,9 @@ require_once $root . '/includes/header.php';
             </a>
 
             <a class="travel-stat-card <?php echo $bucket === 'drivers' ? 'is-active' : ''; ?>" href="<?php echo esc(travel_page_url($projectId, 'drivers')); ?>">
-              <div class="travel-stat-title">Drivers</div>
-              <div class="travel-stat-sub"><?php echo esc((string)$unassignedCount); ?> trips unassigned</div>
-            </a>
+  <div class="travel-stat-title">Drivers</div>
+  <div class="travel-stat-sub"><?php echo esc((string)$driverRosterCount); ?> drivers available</div>
+</a>
           </div>
 
           <div class="travel-top-grid">
@@ -1645,7 +1784,19 @@ require_once $root . '/includes/header.php';
         );
       ?>
 
+      <form method="post" action="">
+        <input type="hidden" name="project_id" value="<?php echo esc((string)$projectId); ?>">
+        <input type="hidden" name="bucket" value="<?php echo esc($bucket); ?>">
+        <input type="hidden" name="q" value="<?php echo esc($searchQ); ?>">
+        <input type="hidden" name="side" value="<?php echo esc($filterSide); ?>">
+        <input type="hidden" name="mode" value="<?php echo esc($filterMode); ?>">
+        <input type="hidden" name="terminal" value="<?php echo esc($filterTerminal); ?>">
+        <input type="hidden" name="driver" value="<?php echo esc($filterDriver); ?>">
+        <input type="hidden" name="guest_id" value="<?php echo esc((string)$selectedGuestId); ?>">
+        <input type="hidden" name="save_driver_assignment" value="1">
+
       <div class="travel-detail-topline">
+
         <div class="travel-detail-label">Guest detail</div>
         <a class="travel-close" href="<?php echo esc($closeUrl); ?>" aria-label="Close travel details">×</a>
       </div>
@@ -1708,7 +1859,14 @@ require_once $root . '/includes/header.php';
           <div class="travel-accordion-body">
             <div>
               <div class="travel-field-label">Assigned driver</div>
-              <input class="travel-input" type="text" value="<?php echo esc($selectedArrivalDriver); ?>" readonly>
+              <select class="travel-select" name="arrival_driver">
+                <option value="">Unassigned</option>
+                <?php foreach ($companyDriverNames as $driverName): ?>
+                  <option value="<?php echo esc($driverName); ?>" <?php echo $selectedArrivalDriverValue === $driverName ? 'selected' : ''; ?>>
+                    <?php echo esc($driverName); ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
             </div>
 
             <div class="travel-mini-grid" style="margin-top:10px;">
@@ -1749,7 +1907,14 @@ require_once $root . '/includes/header.php';
           <div class="travel-accordion-body">
             <div>
               <div class="travel-field-label">Assigned driver</div>
-              <input class="travel-input" type="text" value="<?php echo esc($selectedDepartureDriver); ?>" readonly>
+              <select class="travel-select" name="departure_driver">
+                <option value="">Unassigned</option>
+                <?php foreach ($companyDriverNames as $driverName): ?>
+                  <option value="<?php echo esc($driverName); ?>" <?php echo $selectedDepartureDriverValue === $driverName ? 'selected' : ''; ?>>
+                    <?php echo esc($driverName); ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
             </div>
 
             <div class="travel-mini-grid" style="margin-top:10px;">
@@ -1784,7 +1949,9 @@ require_once $root . '/includes/header.php';
 
       <div class="travel-detail-actions">
         <a class="btn" href="<?php echo esc(base_url('guests/create.php?project_id=' . $projectId . '&guest_id=' . (int)($selectedGuest['id'] ?? 0))); ?>">Edit guest</a>
+        <button class="btn btn-primary" type="submit">Save drivers</button>
       </div>
+      </form>
     <?php else: ?>
       <div class="travel-detail-empty">
         <div>

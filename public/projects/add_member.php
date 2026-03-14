@@ -46,24 +46,26 @@ $projectDateLabel = $createdAt ? date('F j, Y', strtotime($createdAt)) : 'Date T
 
 function role_label(string $role): string {
   $map = [
-    'team_lead' => 'Team lead',
+    'team_lead'    => 'Team lead',
     'coordination' => 'Coordination',
-    'rsvp' => 'RSVP team',
-    'hospitality' => 'Hospitality',
-    'transport' => 'Transport',
-    'vendor' => 'Vendor',
+    'rsvp'         => 'RSVP team',
+    'hospitality'  => 'Hospitality',
+    'transport'    => 'Transport',
+    'vendor'       => 'Vendor',
+    'driver'       => 'Driver',
   ];
   $role = trim($role);
   return $map[$role] ?? ucfirst(str_replace('_', ' ', $role));
 }
 
 $roleOptions = [
-  'team_lead' => role_label('team_lead'),
+  'team_lead'    => role_label('team_lead'),
   'coordination' => role_label('coordination'),
-  'rsvp' => role_label('rsvp'),
-  'hospitality' => role_label('hospitality'),
-  'transport' => role_label('transport'),
-  'vendor' => role_label('vendor'),
+  'rsvp'         => role_label('rsvp'),
+  'hospitality'  => role_label('hospitality'),
+  'transport'    => role_label('transport'),
+  'vendor'       => role_label('vendor'),
+  'driver'       => role_label('driver'),
 ];
 
 // --- Project members list (for bottom table + to disable already-added in dropdown)

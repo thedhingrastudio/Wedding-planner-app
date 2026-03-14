@@ -321,21 +321,25 @@ $memberPhone = (string)($member['phone'] ?? ($member['phone_number'] ?? '—'));
 
           <div class="member-detail-grid">
 
-            <div class="card member-info-card">
-              <div class="proj-card-title">General information</div>
-              <div class="proj-card-sub">Basic information about the member</div>
+           <div class="card member-info-card">
+  <div class="proj-card-title">General information</div>
+  <div class="proj-card-sub">Basic information about the member</div>
 
-              <div class="kv">
-                <div class="kv-row">
-                  <div class="kv-key">Phone</div>
-                  <div class="kv-val"><?php echo h0($memberPhone ?: '—'); ?></div>
-                </div>
-                <div class="kv-row">
-                  <div class="kv-key">Email</div>
-                  <div class="kv-val"><?php echo h0($memberEmail ?: '—'); ?></div>
-                </div>
-              </div>
-            </div>
+  <div class="kv">
+    <div class="kv-row">
+      <div class="kv-key">Phone</div>
+      <div class="kv-val"><?php echo h0($memberPhone ?: '—'); ?></div>
+    </div>
+    <div class="kv-row">
+      <div class="kv-key">Email</div>
+      <div class="kv-val"><?php echo h0($memberEmail ?: '—'); ?></div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px; display:flex; justify-content:flex-end;">
+    <a class="btn" href="<?php echo h0(base_url('projects/member_edit.php?id=' . $projectId . '&mid=' . $memberId)); ?>">Edit details</a>
+  </div>
+</div>
 
             <div class="card member-tasks-card">
               <div class="member-tasks-head">
