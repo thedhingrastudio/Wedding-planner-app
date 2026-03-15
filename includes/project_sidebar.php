@@ -205,16 +205,53 @@ $active = $active ?? 'overview';
 <?php endif; ?>
 
     <a class="project-nav-item project-nav-item--row <?php echo $active === 'hospitality' ? 'is-active' : ''; ?>"
-       href="#"
-       role="listitem"
-       <?php echo $active === 'hospitality' ? 'aria-current="page"' : ''; ?>>
-      <div class="project-nav-ico" aria-hidden="true">🏨</div>
-      <div class="project-nav-text">
-        <div class="project-nav-title">Hotel and hospitality</div>
-        <div class="project-nav-sub">Coordinate rooms, check-ins and guest support during their stay</div>
+   href="<?= h(base_url('hospitality/index.php?project_id=' . (int)$projectId)) ?>"
+   role="listitem"
+   <?php echo $active === 'hospitality' ? 'aria-current="page"' : ''; ?>>
+  <div class="project-nav-ico" aria-hidden="true">🏨</div>
+  <div class="project-nav-text">
+    <div class="project-nav-title">Hotel and hospitality</div>
+    <div class="project-nav-sub">Coordinate rooms, check-ins and guest support during their stay.</div>
+  </div>
+  <div class="project-nav-arrow" aria-hidden="true"><?php echo $active === 'hospitality' ? '⌄' : '›'; ?></div>
+</a>
+
+<?php if ($active === 'hospitality'): ?>
+  <?php
+    $hospitalitySteps = [
+      ['label' => 'Room requests',      'done' => true],
+      ['label' => 'Room allocations',   'done' => true],
+      ['label' => 'IDs pending',        'done' => true],
+      ['label' => 'Special requests',   'done' => true],
+      ['label' => 'Check-in timeline',  'done' => true],
+      ['label' => 'Check-out timeline', 'done' => false],
+      ['label' => 'Help desk / issues', 'done' => false],
+    ];
+  ?>
+  <div style="padding:10px 14px 14px 52px;">
+    <?php foreach ($hospitalitySteps as $step): ?>
+      <div style="display:flex; align-items:center; gap:10px; padding:8px 0; font-size:13px; color:#1f1f1f;">
+        <span style="
+          width:20px;
+          height:20px;
+          border-radius:999px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          font-size:12px;
+          font-weight:700;
+          background:<?php echo $step['done'] ? '#1f8cff' : 'transparent'; ?>;
+          border:1.5px solid <?php echo $step['done'] ? '#1f8cff' : 'rgba(0,0,0,0.22)'; ?>;
+          color:#fff;
+          flex:0 0 20px;
+        ">
+          <?php echo $step['done'] ? '✓' : ''; ?>
+        </span>
+        <span><?php echo h($step['label']); ?></span>
       </div>
-      <div class="project-nav-arrow" aria-hidden="true">›</div>
-    </a>
+    <?php endforeach; ?>
+  </div>
+<?php endif; ?>
 
   </div>
 

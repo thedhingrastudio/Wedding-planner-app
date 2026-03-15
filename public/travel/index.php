@@ -177,6 +177,16 @@ function travel_driver_chip_class(string $driver): string {
   };
 }
 
+function driver_member_status_label(string $status): string {
+  $status = strtolower(trim($status));
+  return $status === 'active' ? 'Available' : 'Unavailable';
+}
+
+function driver_member_status_class(string $status): string {
+  $status = strtolower(trim($status));
+  return $status === 'active' ? 'is-available' : 'is-unavailable';
+}
+
 function travel_terminal_label(array $row, string $kind): string {
   if ($kind === 'departure') {
     return first_non_empty([
@@ -453,19 +463,27 @@ try {
 }
 
 
+$projectDriverRows = [];
 $companyDriverNames = [];
+
 if (table_exists_local($pdo, 'project_members')) {
   try {
     $ds = $pdo->prepare("
       SELECT DISTINCT
-        COALESCE(NULLIF(TRIM(cm.full_name), ''), NULLIF(TRIM(pm.display_name), '')) AS full_name
+        pm.company_member_id,
+        COALESCE(NULLIF(TRIM(cm.full_name), ''), NULLIF(TRIM(pm.display_name), '')) AS full_name,
+        COALESCE(NULLIF(TRIM(cm.phone), ''), '') AS phone,
+        COALESCE(NULLIF(TRIM(cm.status), ''), 'inactive') AS member_status,
+        COALESCE(NULLIF(TRIM(cm.driver_car_model), ''), '') AS driver_car_model,
+        COALESCE(NULLIF(TRIM(cm.driver_car_type), ''), '') AS driver_car_type,
+        COALESCE(NULLIF(TRIM(cm.driver_plate_number), ''), '') AS driver_plate_number,
+        COALESCE(cm.driver_seating_capacity, 0) AS driver_seating_capacity
       FROM project_members pm
       LEFT JOIN company_members cm
         ON cm.id = pm.company_member_id
        AND cm.company_id = :cid
       WHERE pm.project_id = :pid
         AND pm.role = 'driver'
-        AND (cm.id IS NULL OR cm.status = 'active')
       ORDER BY full_name ASC
     ");
     $ds->execute([
@@ -475,14 +493,42 @@ if (table_exists_local($pdo, 'project_members')) {
 
     foreach ($ds->fetchAll() ?: [] as $driverRow) {
       $name = trim((string)($driverRow['full_name'] ?? ''));
-      if ($name !== '') {
+      if ($name === '') continue;
+
+      $carModel = trim((string)($driverRow['driver_car_model'] ?? ''));
+      $carType = trim((string)($driverRow['driver_car_type'] ?? ''));
+      $plate = trim((string)($driverRow['driver_plate_number'] ?? ''));
+      $seats = (int)($driverRow['driver_seating_capacity'] ?? 0);
+      $memberStatus = trim((string)($driverRow['member_status'] ?? 'inactive'));
+
+      $vehicleParts = [];
+      if ($carModel !== '') $vehicleParts[] = $carModel;
+      if ($carType !== '') $vehicleParts[] = $carType;
+      if ($seats > 0) $vehicleParts[] = $seats . ' seats';
+
+      $vehicleLabel = $vehicleParts ? implode(' · ', $vehicleParts) : 'Not added';
+
+      $projectDriverRows[] = [
+        'name' => $name,
+        'phone' => trim((string)($driverRow['phone'] ?? '')),
+        'vehicle' => $vehicleLabel,
+        'plate' => $plate !== '' ? $plate : 'Not added',
+        'member_status' => $memberStatus,
+        'status_label' => driver_member_status_label($memberStatus),
+        'status_class' => driver_member_status_class($memberStatus),
+      ];
+
+      if (strtolower($memberStatus) === 'active') {
         $companyDriverNames[strtolower($name)] = $name;
       }
     }
   } catch (Throwable $e) {
+    $projectDriverRows = [];
     $companyDriverNames = [];
   }
 }
+
+$driverRosterCount = count($companyDriverNames);
 
 $driverRosterCount = count($companyDriverNames);
 
@@ -693,6 +739,39 @@ $missingTravelCount = count($missingTravelGuests);
 
 
 $driverAssignedCount = count($assignedDriverMap);
+
+$driverTripCounts = [];
+foreach ($allTripRows as $trip) {
+  $driverName = trim((string)($trip['driver'] ?? ''));
+  if ($driverName !== '' && $driverName !== 'Unassigned') {
+    $key = strtolower($driverName);
+    $driverTripCounts[$key] = ($driverTripCounts[$key] ?? 0) + 1;
+  }
+}
+
+$driverDisplayRows = [];
+foreach ($projectDriverRows as $driverRow) {
+  $nameKey = strtolower((string)$driverRow['name']);
+  $tripCount = (int)($driverTripCounts[$nameKey] ?? 0);
+
+  if ($searchQ !== '') {
+    $needle = strtolower($searchQ);
+    $haystack = strtolower(implode(' ', [
+      $driverRow['name'],
+      $driverRow['phone'],
+      $driverRow['vehicle'],
+      $driverRow['plate'],
+      $driverRow['status_label'],
+    ]));
+    if (!str_contains($haystack, $needle)) {
+      continue;
+    }
+  }
+
+  $driverDisplayRows[] = $driverRow + [
+    'trip_count' => $tripCount,
+  ];
+}
 
 /* ---------- Overview numbers ---------- */
 $missingTerminalCount = 0;
@@ -1131,6 +1210,79 @@ require_once $root . '/includes/header.php';
   line-height:1.55;
 }
 
+
+.travel-driver-table-card{
+  padding:8px 14px 10px;
+  border-radius:26px;
+  overflow-x:auto;
+  overflow-y:hidden;
+}
+
+.travel-driver-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+}
+
+.travel-driver-table thead th{
+  text-align:left;
+  padding:14px 14px 14px;
+  font-size:12px;
+  color:#b0b0b6;
+  font-weight:700;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+  vertical-align:top;
+}
+
+.travel-driver-table tbody td{
+  text-align:left;
+  padding:14px 14px;
+  border-bottom:1px solid rgba(0,0,0,0.05);
+  vertical-align:middle;
+  font-size:13px;
+  color:#1f1f22;
+}
+
+.travel-driver-table tbody tr:last-child td{
+  border-bottom:none;
+}
+
+.travel-driver-name{
+  font-size:14px;
+  font-weight:700;
+  color:#1d1d1f;
+  line-height:1.35;
+}
+
+.travel-driver-meta{
+  color:#66666d;
+  font-size:13px;
+  line-height:1.4;
+}
+
+.driver-status-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:30px;
+  padding:0 14px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+  white-space:nowrap;
+}
+
+.driver-status-pill.is-available{
+  background:#efefef;
+  color:#6a6a70;
+}
+
+.driver-status-pill.is-unavailable{
+  background:#f4e6e6;
+  color:#8a5b5b;
+}
+
+
 .overview-card,
 .travel-detail-card{
   padding:18px;
@@ -1542,125 +1694,171 @@ require_once $root . '/includes/header.php';
                 <input type="hidden" name="bucket" value="<?php echo esc($bucket); ?>">
 
                 <div class="travel-toolbar">
-                  <div class="travel-search">
-                    <div class="travel-search-wrap">
-                      <span class="search-ico">🔍</span>
-                      <input type="text" name="q" value="<?php echo esc($searchQ); ?>" placeholder="Search guest">
-                    </div>
-                  </div>
+  <div class="travel-search">
+    <div class="travel-search-wrap">
+      <span class="search-ico">🔍</span>
+      <input
+        type="text"
+        name="q"
+        value="<?php echo esc($searchQ); ?>"
+        placeholder="<?php echo $bucket === 'drivers' ? 'Search driver' : 'Search guest'; ?>"
+      >
+    </div>
+  </div>
 
-                  <div class="travel-toolbar-right">
-                    <button class="travel-date-chip" type="button">Custom dates — dd/mm/yyyy to dd/mm/yyyy</button>
-                  </div>
-                </div>
+  <?php if ($bucket !== 'drivers'): ?>
+    <div class="travel-toolbar-right">
+      <button class="travel-date-chip" type="button">Custom dates — dd/mm/yyyy to dd/mm/yyyy</button>
+    </div>
+  <?php endif; ?>
+</div>
 
-                <div class="card proj-card travel-table-card">
-                  <?php if ($displayRows): ?>
-                    <table class="travel-table">
-                      <thead>
-                        <tr>
-                          <th class="travel-col-name">Guest name</th>
+                <?php if ($bucket === 'drivers'): ?>
+  <div class="card proj-card travel-driver-table-card">
+    <?php if ($driverDisplayRows): ?>
+      <table class="travel-driver-table">
+        <thead>
+          <tr>
+            <th>Driver</th>
+            <th>Phone</th>
+            <th>Vehicle</th>
+            <th>Number plate</th>
+            <th>Trips</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($driverDisplayRows as $driverRow): ?>
+            <tr>
+              <td><div class="travel-driver-name"><?php echo esc($driverRow['name']); ?></div></td>
+              <td><div class="travel-driver-meta"><?php echo esc($driverRow['phone'] !== '' ? $driverRow['phone'] : 'Not added'); ?></div></td>
+              <td><div class="travel-driver-meta"><?php echo esc($driverRow['vehicle']); ?></div></td>
+              <td><div class="travel-driver-meta"><?php echo esc($driverRow['plate']); ?></div></td>
+              <td><div class="travel-driver-meta"><?php echo esc((string)$driverRow['trip_count']); ?></div></td>
+              <td>
+                <span class="driver-status-pill <?php echo esc($driverRow['status_class']); ?>">
+                  <?php echo esc($driverRow['status_label']); ?>
+                </span>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php else: ?>
+      <div class="empty-table">
+        No drivers match this view yet. Add project members with the driver responsibility to see them here.
+      </div>
+    <?php endif; ?>
+  </div>
+<?php else: ?>
+  <div class="card proj-card travel-table-card">
+    <?php if ($displayRows): ?>
+      <table class="travel-table">
+        <thead>
+          <tr>
+            <th class="travel-col-name">Guest name</th>
 
-                          <th>
-                            <div class="travel-th-wrap">
-                              <div class="travel-th-top">Side <span class="chev">⌄</span></div>
-                              <select class="travel-th-filter" name="side" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="bride" <?php echo $filterSide === 'bride' ? 'selected' : ''; ?>>Bride’s side</option>
-                                <option value="groom" <?php echo $filterSide === 'groom' ? 'selected' : ''; ?>>Groom’s side</option>
-                                <option value="both" <?php echo $filterSide === 'both' ? 'selected' : ''; ?>>Both families</option>
-                              </select>
-                            </div>
-                          </th>
+            <th>
+              <div class="travel-th-wrap">
+                <div class="travel-th-top">Side <span class="chev">⌄</span></div>
+                <select class="travel-th-filter" name="side" onchange="this.form.submit()">
+                  <option value="">All</option>
+                  <option value="bride" <?php echo $filterSide === 'bride' ? 'selected' : ''; ?>>Bride’s side</option>
+                  <option value="groom" <?php echo $filterSide === 'groom' ? 'selected' : ''; ?>>Groom’s side</option>
+                  <option value="both" <?php echo $filterSide === 'both' ? 'selected' : ''; ?>>Both families</option>
+                </select>
+              </div>
+            </th>
 
-                          <th>
-                            <div class="travel-th-wrap">
-                              <div class="travel-th-top">Train / flight <span class="chev">⌄</span></div>
-                              <select class="travel-th-filter" name="mode" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <option value="flight" <?php echo $filterMode === 'flight' ? 'selected' : ''; ?>>Flight</option>
-                                <option value="train" <?php echo $filterMode === 'train' ? 'selected' : ''; ?>>Train</option>
-                                <option value="not_sure" <?php echo $filterMode === 'not_sure' ? 'selected' : ''; ?>>Not sure</option>
-                              </select>
-                            </div>
-                          </th>
+            <th>
+              <div class="travel-th-wrap">
+                <div class="travel-th-top">Train / flight <span class="chev">⌄</span></div>
+                <select class="travel-th-filter" name="mode" onchange="this.form.submit()">
+                  <option value="">All</option>
+                  <option value="flight" <?php echo $filterMode === 'flight' ? 'selected' : ''; ?>>Flight</option>
+                  <option value="train" <?php echo $filterMode === 'train' ? 'selected' : ''; ?>>Train</option>
+                  <option value="not_sure" <?php echo $filterMode === 'not_sure' ? 'selected' : ''; ?>>Not sure</option>
+                </select>
+              </div>
+            </th>
 
-                          <th>
-                            <div class="travel-th-wrap">
-                              <div class="travel-th-top">Date</div>
-                              <div class="travel-th-filter" style="display:flex;align-items:center;">dd/mm/yyyy</div>
-                            </div>
-                          </th>
+            <th>
+              <div class="travel-th-wrap">
+                <div class="travel-th-top">Date</div>
+                <div class="travel-th-filter" style="display:flex;align-items:center;">dd/mm/yyyy</div>
+              </div>
+            </th>
 
-                          <th>
-                            <div class="travel-th-wrap">
-                              <div class="travel-th-top">Terminal <span class="chev">⌄</span></div>
-                              <select class="travel-th-filter" name="terminal" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <?php foreach ($terminalOptions as $terminalOption): ?>
-                                  <option value="<?php echo esc($terminalOption); ?>" <?php echo strtolower($filterTerminal) === strtolower($terminalOption) ? 'selected' : ''; ?>>
-                                    <?php echo esc($terminalOption); ?>
-                                  </option>
-                                <?php endforeach; ?>
-                              </select>
-                            </div>
-                          </th>
+            <th>
+              <div class="travel-th-wrap">
+                <div class="travel-th-top">Terminal <span class="chev">⌄</span></div>
+                <select class="travel-th-filter" name="terminal" onchange="this.form.submit()">
+                  <option value="">All</option>
+                  <?php foreach ($terminalOptions as $terminalOption): ?>
+                    <option value="<?php echo esc($terminalOption); ?>" <?php echo strtolower($filterTerminal) === strtolower($terminalOption) ? 'selected' : ''; ?>>
+                      <?php echo esc($terminalOption); ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </th>
 
-                          <th>
-                            <div class="travel-th-wrap">
-                              <div class="travel-th-top">Driver <span class="chev">⌄</span></div>
-                              <select class="travel-th-filter" name="driver" onchange="this.form.submit()">
-                                <option value="">All</option>
-                                <?php foreach ($driverOptions as $driverOption): ?>
-                                  <option value="<?php echo esc($driverOption); ?>" <?php echo strtolower($filterDriver) === strtolower($driverOption) ? 'selected' : ''; ?>>
-                                    <?php echo esc($driverOption); ?>
-                                  </option>
-                                <?php endforeach; ?>
-                              </select>
-                            </div>
-                          </th>
-                        </tr>
-                      </thead>
+            <th>
+              <div class="travel-th-wrap">
+                <div class="travel-th-top">Driver <span class="chev">⌄</span></div>
+                <select class="travel-th-filter" name="driver" onchange="this.form.submit()">
+                  <option value="">All</option>
+                  <?php foreach ($driverOptions as $driverOption): ?>
+                    <option value="<?php echo esc($driverOption); ?>" <?php echo strtolower($filterDriver) === strtolower($driverOption) ? 'selected' : ''; ?>>
+                      <?php echo esc($driverOption); ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </th>
+          </tr>
+        </thead>
 
-                      <tbody>
-  <?php foreach ($displayRows as $trip): ?>
-    <?php
-      $rowUrl = travel_page_url(
-        $projectId,
-        $bucket,
-        $searchQ,
-        $filterSide,
-        $filterMode,
-        $filterTerminal,
-        $filterDriver,
-        (int)$trip['guest_id']
-      );
+        <tbody>
+          <?php foreach ($displayRows as $trip): ?>
+            <?php
+              $rowUrl = travel_page_url(
+                $projectId,
+                $bucket,
+                $searchQ,
+                $filterSide,
+                $filterMode,
+                $filterTerminal,
+                $filterDriver,
+                (int)$trip['guest_id']
+              );
 
-      $isSelected = $selectedGuestId > 0 && (int)$trip['guest_id'] === $selectedGuestId;
-    ?>
-    <tr
-      class="travel-table-row <?php echo $isSelected ? 'is-selected' : ''; ?>"
-      data-travel-row-url="<?php echo esc($rowUrl); ?>"
-      tabindex="0"
-      role="button"
-      aria-label="View travel details for <?php echo esc($trip['guest_name']); ?>"
-    >
-      <td class="travel-name"><?php echo esc($trip['guest_name']); ?></td>
-      <td class="travel-side-text"><?php echo esc(side_label($trip['side'])); ?></td>
-      <td><span class="table-chip <?php echo esc($trip['mode_class']); ?>"><?php echo esc($trip['mode_label']); ?></span></td>
-      <td><span class="table-chip neutral"><?php echo esc($trip['date_label']); ?></span></td>
-      <td><span class="table-chip neutral"><?php echo esc($trip['terminal']); ?></span></td>
-      <td><span class="table-chip <?php echo esc($trip['driver_class']); ?>"><?php echo esc($trip['driver']); ?></span></td>
-    </tr>
-  <?php endforeach; ?>
-</tbody>
-                    </table>
-                  <?php else: ?>
-                    <div class="empty-table">
-                      No travel records match this view yet. Save arrival or departure details on the guest form first, then they will show up here.
-                    </div>
-                  <?php endif; ?>
-                </div>
+              $isSelected = $selectedGuestId > 0 && (int)$trip['guest_id'] === $selectedGuestId;
+            ?>
+            <tr
+              class="travel-table-row <?php echo $isSelected ? 'is-selected' : ''; ?>"
+              data-travel-row-url="<?php echo esc($rowUrl); ?>"
+              tabindex="0"
+              role="button"
+              aria-label="View travel details for <?php echo esc($trip['guest_name']); ?>"
+            >
+              <td class="travel-name"><?php echo esc($trip['guest_name']); ?></td>
+              <td class="travel-side-text"><?php echo esc(side_label($trip['side'])); ?></td>
+              <td><span class="table-chip <?php echo esc($trip['mode_class']); ?>"><?php echo esc($trip['mode_label']); ?></span></td>
+              <td><span class="table-chip neutral"><?php echo esc($trip['date_label']); ?></span></td>
+              <td><span class="table-chip neutral"><?php echo esc($trip['terminal']); ?></span></td>
+              <td><span class="table-chip <?php echo esc($trip['driver_class']); ?>"><?php echo esc($trip['driver']); ?></span></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php else: ?>
+      <div class="empty-table">
+        No travel records match this view yet. Save arrival or departure details on the guest form first, then they will show up here.
+      </div>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
               </form>
             </div>
 
@@ -1769,6 +1967,7 @@ require_once $root . '/includes/header.php';
     </div>
   </section>
 
+  <?php if ($bucket !== 'drivers'): ?>
   <section class="card proj-card travel-detail-card">
     <?php if ($selectedGuest): ?>
       <?php
@@ -1963,6 +2162,7 @@ require_once $root . '/includes/header.php';
       </div>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 </aside>
           </div>
         </div>

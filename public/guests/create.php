@@ -275,6 +275,7 @@ if ($existingGuest) {
     'bed_type'         => (string)($existingGuest['bed_type'] ?? ''),
     'id_document_note' => (string)($existingGuest['id_document_note'] ?? ''),
     'stay_notes'       => (string)($existingGuest['stay_notes'] ?? ''),
+    'luggage_count'    => array_key_exists('luggage_count', $existingGuest) ? (string)$existingGuest['luggage_count'] : '',
     'event_ids'        => $existingEventIds,
   ];
 }
@@ -381,6 +382,8 @@ $city              = trim((string)($_POST['city'] ?? ''));
   $bedType           = trim((string)($_POST['bed_type'] ?? ''));
   $idDocumentNote    = trim((string)($_POST['id_document_note'] ?? ''));
   $stayNotes         = trim((string)($_POST['stay_notes'] ?? ''));
+  $luggageCountRaw   = trim((string)($_POST['luggage_count'] ?? ''));
+  $luggageCount      = $luggageCountRaw === '' ? null : max(0, (int)$luggageCountRaw);
 
   $eventIds = array_map('intval', $_POST['event_ids'] ?? []);
   $eventIds = array_values(array_unique(array_intersect($eventIds, $allowedEventIds)));
@@ -461,6 +464,7 @@ $city              = trim((string)($_POST['city'] ?? ''));
             bed_type = :bed_type,
             id_document_note = :id_document_note,
             stay_notes = :stay_notes,
+            luggage_count = :luggage_count,
             updated_at = NOW()
           WHERE id = :guest_id
             AND project_id = :project_id
@@ -503,79 +507,83 @@ $city              = trim((string)($_POST['city'] ?? ''));
           ':bed_type'          => $bedType !== '' ? $bedType : null,
           ':id_document_note'  => $idDocumentNote !== '' ? $idDocumentNote : null,
           ':stay_notes'        => $stayNotes !== '' ? $stayNotes : null,
+          ':luggage_count'     => $luggageCount,
           ':guest_id'          => $postedGuestId,
           ':project_id'        => $projectId,
         ]);
 
         $savedGuestId = $postedGuestId;
       } else {
-        $stmt = $pdo->prepare("
-          INSERT INTO guests (
-            project_id, title, invited_by, first_name, last_name, relation_label, family_group, city,
-            seat_count, children_count, plus_one_allowed,
-            phone, email, address,
-            accessibility, special_notes, diet_preference, allergies,
-            pickup_required, drop_required,
-            arrival_date, arrival_time, arrival_ref, arrival_terminal, arrival_driver,
-            departure_date, departure_time, departure_ref, departure_driver,
-            transport_notes,
-            checkin_date, checkout_date, room_type, bed_type,
-            id_document_note, stay_notes,
-            created_by, created_at, updated_at
-          ) VALUES (
-            :project_id, :title, :invited_by, :first_name, :last_name, :relation_label, :family_group, :city,
-            :seat_count, :children_count, :plus_one_allowed,
-            :phone, :email, :address,
-            :accessibility, :special_notes, :diet_preference, :allergies,
-            :pickup_required, :drop_required,
-            :arrival_date, :arrival_time, :arrival_ref, :arrival_terminal, :arrival_driver,
-            :departure_date, :departure_time, :departure_ref, :departure_driver,
-            :transport_notes,
-            :checkin_date, :checkout_date, :room_type, :bed_type,
-            :id_document_note, :stay_notes,
-            :created_by, NOW(), NOW()
-          )
-        ");
+  $stmt = $pdo->prepare("
+    INSERT INTO guests (
+      project_id, title, invited_by, first_name, last_name, relation_label, family_group, city,
+      seat_count, children_count, plus_one_allowed,
+      phone, email, address,
+      accessibility, special_notes, diet_preference, allergies,
+      pickup_required, drop_required,
+      arrival_date, arrival_time, arrival_ref, arrival_terminal, arrival_driver,
+      departure_date, departure_time, departure_ref, departure_driver,
+      transport_notes,
+      checkin_date, checkout_date, room_type, bed_type,
+      id_document_note, stay_notes, luggage_count,
+      created_by, created_at, updated_at
+    ) VALUES (
+      :project_id, :title, :invited_by, :first_name, :last_name, :relation_label, :family_group, :city,
+      :seat_count, :children_count, :plus_one_allowed,
+      :phone, :email, :address,
+      :accessibility, :special_notes, :diet_preference, :allergies,
+      :pickup_required, :drop_required,
+      :arrival_date, :arrival_time, :arrival_ref, :arrival_terminal, :arrival_driver,
+      :departure_date, :departure_time, :departure_ref, :departure_driver,
+      :transport_notes,
+      :checkin_date, :checkout_date, :room_type, :bed_type,
+      :id_document_note, :stay_notes, :luggage_count,
+      :created_by, NOW(), NOW()
+    )
+  ");
 
-        $stmt->execute([
-          ':project_id'        => $projectId,
-          ':title'             => $title !== '' ? $title : null,
-          ':invited_by'        => $invitedBy,
-          ':first_name'        => $firstName,
-          ':last_name'         => $lastName !== '' ? $lastName : null,
-          ':relation_label'    => $relationLabel !== '' ? $relationLabel : null,
-          ':family_group'      => $familyGroup !== '' ? $familyGroup : null,
-          ':city'              => $city !== '' ? $city : null,
-          ':seat_count'        => $seatCount,
-          ':children_count'    => $childrenCount,
-          ':plus_one_allowed'  => $plusOneAllowed,
-          ':phone'             => $phone !== '' ? $phone : null,
-          ':email'             => $email !== '' ? $email : null,
-          ':address'           => $address !== '' ? $address : null,
-          ':accessibility'     => $accessibility !== '' ? $accessibility : null,
-          ':special_notes'     => $specialNotes !== '' ? $specialNotes : null,
-          ':diet_preference'   => $dietPreference !== '' ? $dietPreference : null,
-          ':allergies'         => $allergies !== '' ? $allergies : null,
-          ':pickup_required'   => $pickupRequired,
-          ':drop_required'     => $dropRequired,
-          ':arrival_date'      => $arrivalDate,
-          ':arrival_time'      => $arrivalTime,
-          ':arrival_ref'       => $arrivalRef !== '' ? $arrivalRef : null,
-          ':arrival_terminal'  => $arrivalTerminal !== '' ? $arrivalTerminal : null,
-          ':arrival_driver'    => $arrivalDriver !== '' ? $arrivalDriver : null,
-          ':departure_date'    => $departureDate,
-          ':departure_time'    => $departureTime,
-          ':departure_ref'     => $departureRef !== '' ? $departureRef : null,
-          ':transport_notes'   => $transportNotes !== '' ? $transportNotes : null,
-          ':departure_driver'  => $departureDriver !== '' ? $departureDriver : null,
-          ':checkin_date'      => $checkinDate,
-          ':checkout_date'     => $checkoutDate,
-          ':room_type'         => $roomType !== '' ? $roomType : null,
-          ':bed_type'          => $bedType !== '' ? $bedType : null,
-          ':id_document_note'  => $idDocumentNote !== '' ? $idDocumentNote : null,
-          ':stay_notes'        => $stayNotes !== '' ? $stayNotes : null,
-          ':created_by'        => $userId > 0 ? $userId : null,
-        ]);
+  $stmt->execute([
+    ':project_id'        => $projectId,
+    ':title'             => $title !== '' ? $title : null,
+    ':invited_by'        => $invitedBy,
+    ':first_name'        => $firstName,
+    ':last_name'         => $lastName !== '' ? $lastName : null,
+    ':relation_label'    => $relationLabel !== '' ? $relationLabel : null,
+    ':family_group'      => $familyGroup !== '' ? $familyGroup : null,
+    ':city'              => $city !== '' ? $city : null,
+    ':seat_count'        => $seatCount,
+    ':children_count'    => $childrenCount,
+    ':plus_one_allowed'  => $plusOneAllowed,
+    ':phone'             => $phone !== '' ? $phone : null,
+    ':email'             => $email !== '' ? $email : null,
+    ':address'           => $address !== '' ? $address : null,
+    ':accessibility'     => $accessibility !== '' ? $accessibility : null,
+    ':special_notes'     => $specialNotes !== '' ? $specialNotes : null,
+    ':diet_preference'   => $dietPreference !== '' ? $dietPreference : null,
+    ':allergies'         => $allergies !== '' ? $allergies : null,
+    ':pickup_required'   => $pickupRequired,
+    ':drop_required'     => $dropRequired,
+    ':arrival_date'      => $arrivalDate,
+    ':arrival_time'      => $arrivalTime,
+    ':arrival_ref'       => $arrivalRef !== '' ? $arrivalRef : null,
+    ':arrival_terminal'  => $arrivalTerminal !== '' ? $arrivalTerminal : null,
+    ':arrival_driver'    => $arrivalDriver !== '' ? $arrivalDriver : null,
+    ':departure_date'    => $departureDate,
+    ':departure_time'    => $departureTime,
+    ':departure_ref'     => $departureRef !== '' ? $departureRef : null,
+    ':departure_driver'  => $departureDriver !== '' ? $departureDriver : null,
+    ':transport_notes'   => $transportNotes !== '' ? $transportNotes : null,
+    ':checkin_date'      => $checkinDate,
+    ':checkout_date'     => $checkoutDate,
+    ':room_type'         => $roomType !== '' ? $roomType : null,
+    ':bed_type'          => $bedType !== '' ? $bedType : null,
+    ':id_document_note'  => $idDocumentNote !== '' ? $idDocumentNote : null,
+    ':stay_notes'        => $stayNotes !== '' ? $stayNotes : null,
+    ':luggage_count'     => $luggageCount,
+    ':created_by'        => $userId > 0 ? $userId : null,
+  ]);
+
+ 
 
         $savedGuestId = (int)$pdo->lastInsertId();
       }
@@ -1261,9 +1269,14 @@ require_once $root . '/includes/header.php';
                       <input id="id_document_note" name="id_document_note" type="text" placeholder="e.g. Aadhaar / passport to be collected" value="<?php echo esc(request_value('id_document_note', $defaults)); ?>">
                     </div>
 
-                    <div class="field">
+                                        <div class="field">
                       <label for="stay_notes">Accommodation remarks</label>
                       <input id="stay_notes" name="stay_notes" type="text" placeholder="e.g. Near lift, connected room, quiet floor" value="<?php echo esc(request_value('stay_notes', $defaults)); ?>">
+                    </div>
+
+                    <div class="field">
+                      <label for="luggage_count">Luggage count</label>
+                      <input id="luggage_count" name="luggage_count" type="number" min="0" placeholder="e.g. 5" value="<?php echo esc(request_value('luggage_count', $defaults)); ?>">
                     </div>
                   </div>
                 </section>
